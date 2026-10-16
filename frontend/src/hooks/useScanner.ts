@@ -37,7 +37,7 @@ export const useScanner = ({ elementId, onScanSuccess }: UseScannerProps) => {
       );
     } catch (e: any) {
       console.error('Camera Scanner initialization failed: ', e);
-      setErrorMsg('Camera access blocked or not found. Try fallback simulation.');
+      setErrorMsg("We couldn't open the camera. Allow camera access in your browser, or add the item manually below.");
       setIsActive(false);
     }
   };

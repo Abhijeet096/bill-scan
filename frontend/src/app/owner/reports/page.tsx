@@ -1,241 +1,208 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { Download, ReceiptText } from 'lucide-react';
+import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { useAuth } from '../../../context/AuthContext';
-import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
-import { Download, Calendar, Search } from 'lucide-react';
+import { useToast } from '../../../context/ToastContext';
+import { formatINR } from '../../../lib/plans';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { StatCard } from '../../../components/ui/StatCard';
+import { Empty, Loading } from '../../../components/ui/States';
+import type { Order, PaymentStatus } from '../../../types';
+
+const STATUS_BADGE: Record<PaymentStatus, string> = {
+  PAID: 'badge-good',
+  PENDING: 'badge-warn',
+  FAILED: 'badge-bad',
+};
+
+const toDateInput = (d: Date) => d.toISOString().split('T')[0];
 
 export default function SalesReports() {
   const { user, apiFetch } = useAuth();
-  
-  const [orders, setOrders] = useState<any[]>([]);
+  const { notify } = useToast();
+
+  const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Totals metrics
-  const [grossSales, setGrossSales] = useState(0);
-  const [taxCollected, setTaxCollected] = useState(0);
-  const [discountsAwarded, setDiscountsAwarded] = useState(0);
-  const [ordersCount, setOrdersCount] = useState(0);
-
-  // Filter parameters
-  const [startDate, setStartDate] = useState('');
-  const [endDate, setEndDate] = useState('');
+  // Default range: the last 30 days.
+  const [startDate, setStartDate] = useState(() => {
+    const d = new Date();
+    d.setDate(d.getDate() - 30);
+    return toDateInput(d);
+  });
+  const [endDate, setEndDate] = useState(() => toDateInput(new Date()));
   const [status, setStatus] = useState('all');
-  const [search, setSearch] = useState('');
 
-  const fetchReports = async () => {
-    if (!user?.storeId) return;
-    setLoading(true);
-    try {
-      const url = `/api/orders?storeId=${user.storeId}&start=${startDate}&end=${endDate}&status=${status}&search=${encodeURIComponent(search)}`;
-      const res = await apiFetch(url);
-      if (res.ok) {
-        const data = await res.json();
-        setOrders(data.orders);
-        calculateMetrics(data.orders);
+  useEffect(() => {
+    if (!user?.storeId || !startDate || !endDate) return;
+    const loadOrders = async () => {
+      setLoading(true);
+      try {
+        const res = await apiFetch(`/api/orders?storeId=${user.storeId}&start=${startDate}&end=${endDate}&status=${status}`);
+        if (res.ok) {
+          const data = await res.json();
+          setOrders(data.orders);
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setLoading(false);
       }
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
-  };
+    };
+    loadOrders();
+  }, [user, startDate, endDate, status]);
 
-  useEffect(() => {
-    // Default: past 30 days
-    const today = new Date();
-    const pastMonth = new Date();
-    pastMonth.setDate(today.getDate() - 30);
-    
-    setEndDate(today.toISOString().split('T')[0]);
-    setStartDate(pastMonth.toISOString().split('T')[0]);
-  }, []);
+  const paidOrders = useMemo(() => orders.filter((o) => o.paymentStatus === 'PAID'), [orders]);
 
-  useEffect(() => {
-    if (startDate && endDate) {
-      fetchReports();
-    }
-  }, [user, startDate, endDate, status, search]);
+  const totals = useMemo(
+    () => ({
+      gross: paidOrders.reduce((sum, o) => sum + o.subtotal, 0),
+      tax: paidOrders.reduce((sum, o) => sum + o.tax, 0),
+      discounts: paidOrders.reduce((sum, o) => sum + o.discount, 0),
+    }),
+    [paidOrders]
+  );
 
-  const calculateMetrics = (orderList: any[]) => {
-    const paidOrders = orderList.filter(o => o.paymentStatus === 'PAID');
-    
-    const gross = paidOrders.reduce((sum, o) => sum + o.subtotal, 0);
-    const tax = paidOrders.reduce((sum, o) => sum + o.tax, 0);
-    const disc = paidOrders.reduce((sum, o) => sum + o.discount, 0);
-
-    setGrossSales(gross);
-    setTaxCollected(tax);
-    setDiscountsAwarded(disc);
-    setOrdersCount(paidOrders.length);
-  };
-
-  // Compile data for Recharts Bar Chart
-  const compileChartData = () => {
-    const dailyMap: { [date: string]: number } = {};
-    orders.filter(o => o.paymentStatus === 'PAID').forEach(o => {
-      const dateStr = new Date(o.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
-      dailyMap[dateStr] = (dailyMap[dateStr] || 0) + o.total;
+  const chartData = useMemo(() => {
+    const byDay = new Map<string, number>();
+    // API returns newest first; reverse so the chart reads left to right in time.
+    [...paidOrders].reverse().forEach((o) => {
+      const day = new Date(o.createdAt).toLocaleDateString([], { month: 'short', day: 'numeric' });
+      byDay.set(day, (byDay.get(day) ?? 0) + o.total);
     });
+    return Array.from(byDay, ([date, revenue]) => ({ date, revenue }));
+  }, [paidOrders]);
 
-    return Object.keys(dailyMap).map(date => ({
-      date,
-      revenue: dailyMap[date]
-    }));
-  };
-
-  // Export orders ledger to CSV
-  const handleExportCSV = () => {
+  const exportCSV = () => {
     if (orders.length === 0) {
-      alert('No invoice data available to export.');
+      notify('There are no orders in this range to export.', 'error');
       return;
     }
 
-    let csv = 'Invoice Number,Timestamp,Customer Name,Customer Email,Payment Method,Subtotal,Tax,Discount,Total Paid,Tx Reference,Status\n';
-    orders.forEach(o => {
-      csv += `"${o.invoiceNumber}","${o.createdAt}","${o.customerName}","${o.customerEmail}","${o.paymentMethod}",${o.subtotal},${o.tax},${o.discount},${o.total},"${o.txRef || ''}","${o.paymentStatus}"\n`;
-    });
+    const header = 'Invoice,Date,Customer,Email,Payment method,Subtotal,Tax,Discount,Total,Reference,Status';
+    const rows = orders.map((o) =>
+      [
+        o.invoiceNumber, o.createdAt, o.customerName, o.customerEmail, o.paymentMethod,
+        o.subtotal, o.tax, o.discount, o.total, o.txRef ?? '', o.paymentStatus,
+      ]
+        .map((cell) => `"${String(cell).replace(/"/g, '""')}"`)
+        .join(',')
+    );
 
-    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
+    const url = URL.createObjectURL(new Blob([[header, ...rows].join('\n')], { type: 'text/csv;charset=utf-8;' }));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `QuickStore_Sales_Report_${Date.now()}.csv`);
-    document.body.appendChild(link);
+    link.download = `sales-report-${startDate}-to-${endDate}.csv`;
     link.click();
-    document.body.removeChild(link);
     URL.revokeObjectURL(url);
   };
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Title banner */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold font-outfit tracking-tight">Ledger Reports</h1>
-          <p className="text-sm text-text-muted mt-1">Export transaction logs and analyze category distributions</p>
-        </div>
-        <button
-          onClick={handleExportCSV}
-          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/25 hover:bg-primary-dark transition-all"
-        >
-          <Download className="w-4 h-4" /> Export CSV Ledger
-        </button>
+    <div>
+      <PageHeader
+        title="Reports"
+        description="Review transactions and download them for your accountant."
+        actions={
+          <button onClick={exportCSV} className="btn-secondary">
+            <Download className="h-4 w-4" /> Export CSV
+          </button>
+        }
+      />
+
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard label="Gross sales" value={formatINR(totals.gross)} note="Paid orders, before tax" />
+        <StatCard label="Tax collected" value={formatINR(totals.tax)} />
+        <StatCard label="Discounts given" value={formatINR(totals.discounts)} />
+        <StatCard label="Paid orders" value={String(paidOrders.length)} />
       </div>
 
-      {/* Metrics Row */}
-      <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-        <div className="p-5 rounded-2xl bg-surface-card border border-border">
-          <span className="text-xs font-semibold text-text-muted">Gross Sales (Paid)</span>
-          <h4 className="text-xl font-bold font-outfit text-foreground mt-1">₹{grossSales.toFixed(2)}</h4>
-        </div>
-        <div className="p-5 rounded-2xl bg-surface-card border border-border">
-          <span className="text-xs font-semibold text-text-muted">Tax Collected</span>
-          <h4 className="text-xl font-bold font-outfit text-primary mt-1">₹{taxCollected.toFixed(2)}</h4>
-        </div>
-        <div className="p-5 rounded-2xl bg-surface-card border border-border">
-          <span className="text-xs font-semibold text-text-muted">Discounts Awarded</span>
-          <h4 className="text-xl font-bold font-outfit text-warning mt-1">-₹{discountsAwarded.toFixed(2)}</h4>
-        </div>
-        <div className="p-5 rounded-2xl bg-surface-card border border-border">
-          <span className="text-xs font-semibold text-text-muted">Total Paid Orders</span>
-          <h4 className="text-xl font-bold font-outfit text-green mt-1">{ordersCount} Invoices</h4>
-        </div>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Ledger table column */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl">
-            <div className="flex flex-col sm:flex-row gap-4 items-center justify-between mb-6">
-              <h3 className="text-lg font-bold font-outfit">Transaction Ledger</h3>
-              
-              <div className="flex flex-wrap gap-3 items-center w-full sm:w-auto">
-                <input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                  className="px-2 py-1.5 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-xs"
+      <section className="card-pad mt-6">
+        <h2 className="text-lg font-semibold">Revenue by day</h2>
+        {chartData.length > 0 ? (
+          <div className="mt-5 h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chartData} margin={{ top: 8, right: 8, left: -12, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="rgb(var(--line))" />
+                <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: 'rgb(var(--muted))' }} />
+                <YAxis tickLine={false} axisLine={false} tick={{ fontSize: 12, fill: 'rgb(var(--muted))' }} />
+                <Tooltip
+                  cursor={{ fill: 'rgb(var(--sunken))' }}
+                  formatter={(value: number) => [formatINR(value), 'Revenue']}
+                  contentStyle={{
+                    background: 'rgb(var(--surface))',
+                    border: '1px solid rgb(var(--line))',
+                    borderRadius: 12,
+                    color: 'rgb(var(--ink))',
+                    fontSize: 13,
+                  }}
                 />
-                <input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                  className="px-2 py-1.5 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-xs"
-                />
-                <select
-                  value={status}
-                  onChange={(e) => setStatus(e.target.value)}
-                  className="px-2 py-1.5 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-xs"
-                >
-                  <option value="all">All Payments</option>
-                  <option value="paid">Completed</option>
-                  <option value="pending">Pending</option>
-                  <option value="failed">Failed</option>
-                </select>
-              </div>
-            </div>
+                <Bar isAnimationActive={false} dataKey="revenue" fill="rgb(var(--brand))" radius={[6, 6, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        ) : (
+          <p className="py-10 text-center text-sm text-muted">No paid orders in this range.</p>
+        )}
+      </section>
 
-            {loading ? (
-              <div className="text-center py-12 text-text-muted text-sm">Querying databases...</div>
-            ) : orders.length > 0 ? (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse text-xs">
-                  <thead>
-                    <tr className="border-b border-border font-bold text-text-muted uppercase tracking-wider">
-                      <th className="pb-3">Invoice Code</th>
-                      <th className="pb-3">Timestamp</th>
-                      <th className="pb-3">Customer details</th>
-                      <th className="pb-3">Total Paid</th>
-                      <th className="pb-3">Tx Reference</th>
-                      <th className="pb-3">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-border/40">
-                    {orders.map((o) => (
-                      <tr key={o.id}>
-                        <td className="py-3 font-semibold font-mono text-primary">{o.invoiceNumber}</td>
-                        <td className="py-3 text-text-muted">{new Date(o.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}</td>
-                        <td className="py-3">
-                          <div className="font-semibold">{o.customerName}</div>
-                          <div className="text-[10px] text-text-muted mt-0.5">{o.customerEmail}</div>
-                        </td>
-                        <td className="py-3 font-bold">₹{o.total.toFixed(2)}</td>
-                        <td className="py-3 font-mono text-text-muted">{o.txRef || '—'}</td>
-                        <td className="py-3">
-                          <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${o.paymentStatus === 'PAID' ? 'bg-green/10 text-green' : o.paymentStatus === 'PENDING' ? 'bg-warning/10 text-warning' : 'bg-danger/10 text-danger'}`}>
-                            {o.paymentStatus}
-                          </span>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <div className="text-center py-12 text-text-muted">No transactions logged in this range.</div>
-            )}
+      <section className="card mt-6">
+        <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">
+          <h2 className="text-lg font-semibold">Transactions</h2>
+          <div className="flex flex-wrap items-center gap-2">
+            <input type="date" value={startDate} max={endDate} onChange={(e) => setStartDate(e.target.value)} className="input w-auto py-2" aria-label="From date" />
+            <span className="text-sm text-muted">to</span>
+            <input type="date" value={endDate} min={startDate} onChange={(e) => setEndDate(e.target.value)} className="input w-auto py-2" aria-label="To date" />
+            <select value={status} onChange={(e) => setStatus(e.target.value)} className="input w-auto py-2" aria-label="Payment status">
+              <option value="all">All payments</option>
+              <option value="paid">Paid</option>
+              <option value="pending">Pending</option>
+              <option value="failed">Failed</option>
+            </select>
           </div>
         </div>
 
-        {/* Charts column */}
-        <div className="space-y-6">
-          <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl">
-            <h3 className="text-lg font-bold font-outfit mb-6">Financial Trends</h3>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={compileChartData()} margin={{ top: 10, right: 10, left: -25, bottom: 0 }}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
-                  <XAxis dataKey="date" stroke="#64748b" style={{ fontSize: 9 }} />
-                  <YAxis stroke="#64748b" style={{ fontSize: 9 }} />
-                  <Tooltip contentStyle={{ background: '#1e293b', border: '1px solid rgba(255,255,255,0.05)', borderRadius: '8px' }} />
-                  <Bar dataKey="revenue" fill="#6366f1" radius={[4, 4, 0, 0]} />
-                </BarChart>
-              </ResponsiveContainer>
-            </div>
+        {loading ? (
+          <Loading label="Loading transactions…" />
+        ) : orders.length > 0 ? (
+          <div className="table-wrap">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Invoice</th>
+                  <th>Date</th>
+                  <th>Customer</th>
+                  <th className="text-right">Total</th>
+                  <th>Reference</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {orders.map((order) => (
+                  <tr key={order.id}>
+                    <td className="font-mono text-xs font-semibold">{order.invoiceNumber}</td>
+                    <td className="whitespace-nowrap text-muted">
+                      {new Date(order.createdAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                    </td>
+                    <td>
+                      <p className="font-medium">{order.customerName}</p>
+                      <p className="text-xs text-muted">{order.customerEmail}</p>
+                    </td>
+                    <td className="tabular text-right font-semibold">{formatINR(order.total)}</td>
+                    <td className="font-mono text-xs text-muted">{order.txRef || '—'}</td>
+                    <td>
+                      <span className={STATUS_BADGE[order.paymentStatus]}>{order.paymentStatus.toLowerCase()}</span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
-        </div>
-      </div>
+        ) : (
+          <Empty icon={<ReceiptText className="h-5 w-5" />} title="No transactions" description="Nothing was recorded in this date range." />
+        )}
+      </section>
     </div>
   );
 }

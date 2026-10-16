@@ -1,39 +1,57 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { CreditCard, Store as StoreIcon } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { Settings, Store, CreditCard } from 'lucide-react';
+import { useToast } from '../../../context/ToastContext';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { Field } from '../../../components/ui/Field';
+import { Loading } from '../../../components/ui/States';
+import type { Store } from '../../../types';
+
+type SettingsForm = Pick<Store, 'name' | 'address' | 'paymentUpiId' | 'merchantName'> & {
+  logoUrl: string;
+  razorpayKeyId: string;
+  razorpayKeySecret: string;
+};
+
+const EMPTY_FORM: SettingsForm = {
+  name: '',
+  address: '',
+  logoUrl: '',
+  paymentUpiId: '',
+  merchantName: '',
+  razorpayKeyId: '',
+  razorpayKeySecret: '',
+};
 
 export default function StoreSettings() {
   const { user, apiFetch } = useAuth();
-  
-  const [store, setStore] = useState<any>(null);
+  const { notify } = useToast();
+
+  const [form, setForm] = useState<SettingsForm>(EMPTY_FORM);
   const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
 
-  // Form states
-  const [name, setName] = useState('');
-  const [address, setAddress] = useState('');
-  const [logoUrl, setLogoUrl] = useState('');
-  const [paymentUpiId, setPaymentUpiId] = useState('');
-  const [merchantName, setMerchantName] = useState('');
-  const [razorpayKeyId, setRazorpayKeyId] = useState('');
-  const [razorpayKeySecret, setRazorpayKeySecret] = useState('');
+  const setField = (key: keyof SettingsForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
-  const fetchStore = async () => {
+  const loadStore = async () => {
     if (!user?.storeId) return;
     setLoading(true);
     try {
       const res = await apiFetch(`/api/stores/${user.storeId}`);
       if (res.ok) {
-        const data = await res.json();
-        setStore(data);
-        setName(data.name);
-        setAddress(data.address);
-        setLogoUrl(data.logoUrl || '');
-        setPaymentUpiId(data.paymentUpiId);
-        setMerchantName(data.merchantName);
-        setRazorpayKeyId(data.razorpayKeyId || '');
-        setRazorpayKeySecret(data.razorpayKeySecret || '');
+        const store: Store = await res.json();
+        setForm({
+          name: store.name,
+          address: store.address,
+          logoUrl: store.logoUrl ?? '',
+          paymentUpiId: store.paymentUpiId,
+          merchantName: store.merchantName,
+          razorpayKeyId: store.razorpayKeyId ?? '',
+          razorpayKeySecret: store.razorpayKeySecret ?? '',
+        });
       }
     } catch (e) {
       console.error(e);
@@ -43,101 +61,84 @@ export default function StoreSettings() {
   };
 
   useEffect(() => {
-    fetchStore();
+    loadStore();
   }, [user]);
 
-  const handleSaveSettings = async (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
-    const payload = {
-      name, address, logoUrl,
-      paymentUpiId, merchantName,
-      razorpayKeyId, razorpayKeySecret
-    };
-
+    setSaving(true);
     try {
       const res = await apiFetch(`/api/stores/${user?.storeId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(form),
       });
 
       if (res.ok) {
-        alert('Settings updated successfully!');
-        fetchStore();
+        notify('Settings saved.', 'success');
+        loadStore();
       } else {
-        alert('Failed to update store configurations.');
+        notify('Could not save your settings.', 'error');
       }
     } catch (e) {
       console.error(e);
+      notify('Could not save your settings.', 'error');
+    } finally {
+      setSaving(false);
     }
   };
 
-  if (loading) {
-    return <div className="text-center py-12 text-text-muted">Loading settings...</div>;
-  }
+  if (loading) return <Loading label="Loading settings…" />;
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Title */}
-      <div>
-        <h1 className="text-3xl font-extrabold font-outfit tracking-tight">Store Settings</h1>
-        <p className="text-sm text-text-muted mt-1">Configure retail profiles and manage banking payout credentials</p>
-      </div>
+    <div>
+      <PageHeader title="Settings" description="Your store profile and where customer payments go." />
 
-      <form onSubmit={handleSaveSettings} className="grid gap-6 md:grid-cols-2">
-        {/* Profile Card */}
-        <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl space-y-4">
-          <h3 className="text-lg font-bold font-outfit flex items-center gap-1.5 text-primary">
-            <Store className="w-5 h-5 text-primary" /> Store Profile Settings
-          </h3>
-          
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Store Name</label>
-            <input type="text" required value={name} onChange={(e) => setName(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
+      <form onSubmit={handleSave} className="grid gap-6 lg:grid-cols-2">
+        <section className="card-pad space-y-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand-fg">
+              <StoreIcon className="h-[18px] w-[18px]" />
+            </span>
+            <h2 className="text-lg font-semibold">Store profile</h2>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Physical Address</label>
-            <textarea rows={3} required value={address} onChange={(e) => setAddress(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
+          <Field label="Store name">
+            <input required value={form.name} onChange={setField('name')} className="input" />
+          </Field>
+          <Field label="Address">
+            <textarea required rows={3} value={form.address} onChange={setField('address')} className="input" />
+          </Field>
+          <Field label="Logo URL (optional)">
+            <input type="url" value={form.logoUrl} onChange={setField('logoUrl')} placeholder="https://…" className="input" />
+          </Field>
+        </section>
+
+        <section className="card-pad space-y-4">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-soft text-brand-fg">
+              <CreditCard className="h-[18px] w-[18px]" />
+            </span>
+            <h2 className="text-lg font-semibold">Payments</h2>
           </div>
 
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Store Logo URL</label>
-            <input type="url" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://unsplash.com/logo.png" className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
-          </div>
-        </div>
+          <Field label="UPI ID" hint="UPI payments from customers are sent to this ID.">
+            <input required value={form.paymentUpiId} onChange={setField('paymentUpiId')} placeholder="store@okaxis" className="input" />
+          </Field>
+          <Field label="Name shown to customers">
+            <input required value={form.merchantName} onChange={setField('merchantName')} placeholder="Kumar Digital Mart" className="input" />
+          </Field>
+          <Field label="Razorpay key ID (optional)">
+            <input value={form.razorpayKeyId} onChange={setField('razorpayKeyId')} placeholder="rzp_test_…" className="input" />
+          </Field>
+          <Field label="Razorpay secret (optional)">
+            <input type="password" autoComplete="off" value={form.razorpayKeySecret} onChange={setField('razorpayKeySecret')} className="input" />
+          </Field>
+        </section>
 
-        {/* Payments Card */}
-        <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl space-y-4">
-          <h3 className="text-lg font-bold font-outfit flex items-center gap-1.5 text-accent">
-            <CreditCard className="w-5 h-5 text-accent" /> Payment Credentials Settings
-          </h3>
-          
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Merchant UPI Address (VPA) *</label>
-            <input type="text" required value={paymentUpiId} onChange={(e) => setPaymentUpiId(e.target.value)} placeholder="e.g. store@okaxis" className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
-            <span className="text-[10px] text-text-muted">UPI QR checkouts deposit directly to this address.</span>
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Merchant Display Name *</label>
-            <input type="text" required value={merchantName} onChange={(e) => setMerchantName(e.target.value)} placeholder="Kumar Digital Mart" className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Razorpay Key ID (Backups)</label>
-            <input type="text" value={razorpayKeyId} onChange={(e) => setRazorpayKeyId(e.target.value)} placeholder="rzp_test_xxxxxx" className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
-          </div>
-
-          <div className="space-y-1">
-            <label className="text-xs font-bold text-text-muted uppercase">Razorpay Secret Key</label>
-            <input type="password" value={razorpayKeySecret} onChange={(e) => setRazorpayKeySecret(e.target.value)} placeholder="••••••••" className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm" />
-          </div>
-        </div>
-
-        <div className="md:col-span-2 flex justify-end gap-3 border-t border-border pt-4">
-          <button type="submit" className="px-6 py-2.5 rounded-xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary-dark transition-all">
-            Save Configurations
+        <div className="flex justify-end lg:col-span-2">
+          <button type="submit" disabled={saving} className="btn-primary px-6">
+            {saving ? 'Saving…' : 'Save changes'}
           </button>
         </div>
       </form>

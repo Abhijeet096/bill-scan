@@ -1,50 +1,50 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Plus, Trash2, Users } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { Users, Plus, X, ShieldAlert, Award, Clock } from 'lucide-react';
+import { useToast } from '../../../context/ToastContext';
+import { formatINR } from '../../../lib/plans';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { Modal } from '../../../components/ui/Modal';
+import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
+import { Field } from '../../../components/ui/Field';
+import { Empty, Loading } from '../../../components/ui/States';
+import type { Employee, EmployeePerformance } from '../../../types';
+
+const PERMISSION_OPTIONS = [
+  { key: 'CASHIER_BILLING', label: 'Create checkout bills' },
+  { key: 'EDIT_CATALOG', label: 'Edit products and prices' },
+  { key: 'MANAGE_EMPLOYEES', label: 'View the staff roster' },
+  { key: 'VIEW_REPORTS', label: 'See reports and ledgers' },
+];
+
+const humanize = (value: string) => value.toLowerCase().replace(/_/g, ' ');
 
 export default function EmployeesRoster() {
   const { user, apiFetch } = useAuth();
-  
-  const [employees, setEmployees] = useState<any[]>([]);
-  const [performances, setPerformances] = useState<any[]>([]);
+  const { notify } = useToast();
+
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [performances, setPerformances] = useState<EmployeePerformance[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Modal
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [removing, setRemoving] = useState<Employee | null>(null);
 
-  // Form fields
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('CASHIER');
-  const [selectedPermissions, setSelectedPermissions] = useState<string[]>(['CASHIER_BILLING']);
+  const [permissions, setPermissions] = useState<string[]>(['CASHIER_BILLING']);
 
-  const permissionOptions = [
-    { key: 'CASHIER_BILLING', label: 'Create checkout bills' },
-    { key: 'EDIT_CATALOG', label: 'Modify product prices' },
-    { key: 'MANAGE_EMPLOYEES', label: 'View employee roster' },
-    { key: 'VIEW_REPORTS', label: 'Access ledger logs' }
-  ];
-
-  const fetchEmployees = async () => {
+  const loadStaff = async () => {
     if (!user?.storeId) return;
     setLoading(true);
     try {
-      // 1. Fetch employees list
-      const rosterRes = await apiFetch('/api/employees');
-      if (rosterRes.ok) {
-        const rosterData = await rosterRes.json();
-        setEmployees(rosterData);
-      }
-
-      // 2. Fetch performance analytics
-      const perfRes = await apiFetch('/api/employees/performance');
-      if (perfRes.ok) {
-        const perfData = await perfRes.json();
-        setPerformances(perfData);
-      }
+      const [rosterRes, performanceRes] = await Promise.all([apiFetch('/api/employees'), apiFetch('/api/employees/performance')]);
+      if (rosterRes.ok) setEmployees(await rosterRes.json());
+      if (performanceRes.ok) setPerformances(await performanceRes.json());
     } catch (e) {
       console.error(e);
     } finally {
@@ -53,205 +53,192 @@ export default function EmployeesRoster() {
   };
 
   useEffect(() => {
-    fetchEmployees();
+    loadStaff();
   }, [user]);
 
-  const handleTogglePermission = (key: string) => {
-    setSelectedPermissions(prev =>
-      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-    );
+  const openForm = () => {
+    setName('');
+    setEmail('');
+    setPassword('');
+    setRole('CASHIER');
+    setPermissions(['CASHIER_BILLING']);
+    setShowForm(true);
   };
 
-  const handleAddEmployee = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const payload = {
-      name, email, password, role,
-      permissions: selectedPermissions
-    };
+  const togglePermission = (key: string) =>
+    setPermissions((prev) => (prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]));
 
+  const handleAdd = async (e: React.FormEvent) => {
+    e.preventDefault();
     try {
       const res = await apiFetch('/api/employees', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify({ name, email, password, role, permissions }),
       });
 
       if (res.ok) {
-        setShowAddModal(false);
-        fetchEmployees();
-        alert('Employee added successfully!');
+        setShowForm(false);
+        loadStaff();
+        notify(`${name} was added to your team.`, 'success');
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to add employee.');
+        notify(err.error || 'Could not add this employee.', 'error');
       }
     } catch (e) {
       console.error(e);
+      notify('Could not add this employee.', 'error');
     }
   };
 
-  const handleDeleteEmployee = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this employee?')) return;
+  const confirmRemove = async () => {
+    if (!removing) return;
     try {
-      const res = await apiFetch(`/api/employees/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) fetchEmployees();
+      const res = await apiFetch(`/api/employees/${removing.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        notify(`${removing.user?.name ?? 'Employee'} was removed.`, 'success');
+        loadStaff();
+      }
     } catch (e) {
       console.error(e);
+    } finally {
+      setRemoving(null);
     }
   };
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold font-outfit tracking-tight">Staff Management</h1>
-          <p className="text-sm text-text-muted mt-1">Assign duties, audit shift logs, and monitor checkout volumes</p>
-        </div>
-        <button
-          onClick={() => setShowAddModal(true)}
-          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/25 hover:bg-primary-dark transition-all"
-        >
-          <Plus className="w-4 h-4" /> Add Employee
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="Staff"
+        description="Add team members, choose what they can do and see who is selling."
+        actions={
+          <button onClick={openForm} className="btn-primary">
+            <Plus className="h-4 w-4" /> Add employee
+          </button>
+        }
+      />
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        {/* Roster list */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl">
-            <h3 className="text-lg font-bold font-outfit mb-4">Store Roster</h3>
-            {loading ? (
-              <div className="text-center py-6 text-text-muted">Loading employee database...</div>
-            ) : employees.length > 0 ? (
-              <div className="divide-y divide-border/40">
-                {employees.map((emp) => (
-                  <div key={emp.id} className="flex items-center justify-between py-4">
-                    <div>
-                      <h4 className="font-semibold">{emp.user?.name}</h4>
-                      <p className="text-xs text-text-muted mt-0.5">{emp.user?.email} | Role: <span className="font-bold text-primary">{emp.role}</span></p>
-                      
-                      {/* Permissions badges */}
-                      <div className="flex flex-wrap gap-1.5 mt-2">
-                        {emp.permissions.map((perm: string) => (
-                          <span key={perm} className="px-2 py-0.5 rounded bg-surface-light dark:bg-white/5 border border-border text-[9px] font-bold uppercase tracking-wider text-text-muted">
-                            {perm}
-                          </span>
-                        ))}
+      {loading ? (
+        <Loading label="Loading your team…" />
+      ) : (
+        <div className="grid gap-6 lg:grid-cols-3">
+          <section className="card lg:col-span-2">
+            <h2 className="px-6 pt-6 text-lg font-semibold">Team</h2>
+            {employees.length > 0 ? (
+              <ul className="mt-2 divide-y divide-line">
+                {employees.map((employee) => (
+                  <li key={employee.id} className="flex items-start justify-between gap-4 px-6 py-5">
+                    <div className="flex min-w-0 gap-3">
+                      <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-brand-soft text-sm font-bold text-brand-fg">
+                        {(employee.user?.name ?? '?').charAt(0).toUpperCase()}
+                      </span>
+                      <div className="min-w-0">
+                        <p className="font-semibold">
+                          {employee.user?.name} <span className="badge-neutral ml-1 capitalize">{employee.role.toLowerCase()}</span>
+                        </p>
+                        <p className="truncate text-sm text-muted">{employee.user?.email}</p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {employee.permissions.map((permission) => (
+                            <span key={permission} className="rounded-md bg-sunken px-2 py-0.5 text-xs capitalize text-muted">
+                              {humanize(permission)}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     </div>
 
-                    {emp.role !== 'OWNER' && (
-                      <button
-                        onClick={() => handleDeleteEmployee(emp.id)}
-                        className="px-3 py-1.5 rounded-xl text-xs font-semibold border border-danger/20 text-danger hover:bg-danger/10 transition-colors"
-                      >
-                        Remove
+                    {employee.role !== 'OWNER' && (
+                      <button onClick={() => setRemoving(employee)} className="btn-icon shrink-0 hover:text-bad-fg" aria-label={`Remove ${employee.user?.name}`}>
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     )}
-                  </div>
+                  </li>
                 ))}
-              </div>
+              </ul>
             ) : (
-              <div className="text-center py-6 text-text-muted">No staff added yet.</div>
+              <Empty icon={<Users className="h-5 w-5" />} title="No staff yet" description="Add a cashier or manager to share the work." />
             )}
-          </div>
-        </div>
+          </section>
 
-        {/* Scorecard Column */}
-        <div className="space-y-6">
-          <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl">
-            <h3 className="text-lg font-bold font-outfit mb-4">Sales Performance scorecard</h3>
-            <div className="space-y-4">
-              {loading ? (
-                <div className="text-center py-4 text-text-muted">Calculating contributions...</div>
-              ) : performances.length > 0 ? (
-                performances.map((perf) => (
-                  <div key={perf.employeeId} className="p-4 rounded-2xl bg-background/50 border border-border flex items-center justify-between">
+          <section className="card-pad h-fit">
+            <h2 className="text-lg font-semibold">Sales by team member</h2>
+            {performances.length > 0 ? (
+              <ul className="mt-4 space-y-3">
+                {performances.map((p) => (
+                  <li key={p.employeeId} className="flex items-center justify-between gap-3 rounded-xl bg-sunken p-4">
                     <div>
-                      <h4 className="font-semibold text-sm">{perf.name}</h4>
-                      <span className="text-[10px] text-text-muted tracking-wider uppercase font-bold">{perf.role}</span>
+                      <p className="text-sm font-semibold">{p.name}</p>
+                      <p className="text-xs capitalize text-muted">{p.role.toLowerCase()}</p>
                     </div>
                     <div className="text-right">
-                      <div className="text-xs font-bold">{perf.transactionsCount} checkout invoices</div>
-                      <div className="text-xs text-green font-semibold mt-0.5">₹{perf.totalSalesGenerated.toFixed(2)}</div>
+                      <p className="tabular text-sm font-semibold">{formatINR(p.totalSalesGenerated)}</p>
+                      <p className="text-xs text-muted">{p.transactionsCount} bills</p>
                     </div>
-                  </div>
-                ))
-              ) : (
-                <p className="text-center text-xs text-text-muted">No cashier sales recorded.</p>
-              )}
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* MODAL: Register employee */}
-      {showAddModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/60 backdrop-blur-sm">
-          <div className="w-full max-w-md p-6 rounded-3xl glass-card border border-white/5 shadow-2xl">
-            <div className="flex items-center justify-between pb-4 border-b border-border mb-6">
-              <h3 className="text-xl font-bold font-outfit">Add Store Employee</h3>
-              <button onClick={() => setShowAddModal(false)} className="p-1 rounded-lg text-text-muted hover:text-foreground">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <form onSubmit={handleAddEmployee} className="space-y-4">
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Employee Name</label>
-                <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Amit Kumar" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Login Email</label>
-                <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="amit@store.com" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Password</label>
-                <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Role Assignment</label>
-                <select
-                  value={role}
-                  onChange={(e) => setRole(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm"
-                >
-                  <option value="MANAGER">Store Manager</option>
-                  <option value="CASHIER">Cashier Agent</option>
-                  <option value="STAFF">General Staff</option>
-                </select>
-              </div>
-
-              <div className="space-y-2">
-                <label className="text-xs font-bold text-text-muted uppercase block">Set Access Permissions</label>
-                <div className="grid gap-2 text-xs">
-                  {permissionOptions.map(opt => (
-                    <label key={opt.key} className="flex items-center gap-2 cursor-pointer p-2 rounded-lg hover:bg-white/5 border border-transparent hover:border-border">
-                      <input
-                        type="checkbox"
-                        checked={selectedPermissions.includes(opt.key)}
-                        onChange={() => handleTogglePermission(opt.key)}
-                        className="rounded accent-primary"
-                      />
-                      <span>{opt.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-3 border-t border-border pt-4 mt-6">
-                <button type="button" onClick={() => setShowAddModal(false)} className="px-4 py-2 rounded-xl border border-border hover:bg-surface-light dark:hover:bg-white/5 text-sm font-semibold">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary-dark">Register Employee</button>
-              </div>
-            </form>
-          </div>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="py-6 text-center text-sm text-muted">No sales recorded by staff yet.</p>
+            )}
+          </section>
         </div>
       )}
+
+      <Modal open={showForm} onClose={() => setShowForm(false)} title="Add employee" width="sm:max-w-md">
+        <form onSubmit={handleAdd} className="space-y-4">
+          <Field label="Full name">
+            <input required value={name} onChange={(e) => setName(e.target.value)} placeholder="Amit Kumar" className="input" />
+          </Field>
+          <Field label="Login email">
+            <input type="email" required value={email} onChange={(e) => setEmail(e.target.value)} placeholder="amit@yourstore.com" className="input" />
+          </Field>
+          <Field label="Password">
+            <input type="password" required value={password} onChange={(e) => setPassword(e.target.value)} className="input" />
+          </Field>
+          <Field label="Role">
+            <select value={role} onChange={(e) => setRole(e.target.value)} className="input">
+              <option value="MANAGER">Store manager</option>
+              <option value="CASHIER">Cashier</option>
+              <option value="STAFF">General staff</option>
+            </select>
+          </Field>
+
+          <fieldset>
+            <legend className="label">Permissions</legend>
+            <div className="space-y-1">
+              {PERMISSION_OPTIONS.map((option) => (
+                <label key={option.key} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-sm hover:bg-sunken">
+                  <input
+                    type="checkbox"
+                    checked={permissions.includes(option.key)}
+                    onChange={() => togglePermission(option.key)}
+                    className="h-4 w-4 rounded border-line accent-[rgb(var(--brand))]"
+                  />
+                  {option.label}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex justify-end gap-2 border-t border-line pt-4">
+            <button type="button" onClick={() => setShowForm(false)} className="btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary">
+              Add employee
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <ConfirmDialog
+        open={!!removing}
+        title="Remove employee?"
+        message={`${removing?.user?.name ?? 'This person'} will lose access to your store immediately.`}
+        confirmLabel="Remove"
+        onConfirm={confirmRemove}
+        onCancel={() => setRemoving(null)}
+      />
     </div>
   );
 }

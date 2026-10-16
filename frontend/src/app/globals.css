@@ -2,142 +2,188 @@
 @tailwind components;
 @tailwind utilities;
 
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap');
-
+/* Design tokens. Values are space-separated RGB so Tailwind can apply opacity. */
 :root {
-  --background: #f8fafc;
-  --foreground: #0f172a;
-  --glass-bg: rgba(255, 255, 255, 0.6);
-  --glass-border: rgba(255, 255, 255, 0.4);
-  --card-bg: #ffffff;
-  --card-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
-  --text-muted: #64748b;
-  --border: #e2e8f0;
+  --canvas: 250 250 247;
+  --surface: 255 255 255;
+  --sunken: 243 243 238;
+  --line: 231 230 223;
+  --ink: 20 24 31;
+  --muted: 95 102 114;
+
+  --brand: 15 138 92;
+  --brand-hover: 13 111 76;
+  --brand-soft: 232 247 240;
+  --brand-fg: 13 111 76;
+
+  --good: 15 138 92;
+  --good-soft: 232 247 240;
+  --good-fg: 13 111 76;
+  --warn: 217 119 6;
+  --warn-soft: 254 243 219;
+  --warn-fg: 146 76 6;
+  --bad: 220 38 38;
+  --bad-soft: 254 232 232;
+  --bad-fg: 185 28 28;
 }
 
 .dark {
-  --background: #0b0f19;
-  --foreground: #f8fafc;
-  --glass-bg: rgba(15, 23, 42, 0.65);
-  --glass-border: rgba(255, 255, 255, 0.05);
-  --card-bg: #1e293b;
-  --card-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.3), 0 4px 6px -4px rgb(0 0 0 / 0.3);
-  --text-muted: #94a3b8;
-  --border: rgba(255, 255, 255, 0.05);
+  --canvas: 12 17 15;
+  --surface: 20 27 24;
+  --sunken: 27 36 32;
+  --line: 40 52 46;
+  --ink: 236 242 238;
+  --muted: 154 168 161;
+
+  --brand: 26 165 111;
+  --brand-hover: 59 190 136;
+  --brand-soft: 18 48 40;
+  --brand-fg: 95 211 161;
+
+  --good: 26 165 111;
+  --good-soft: 18 48 40;
+  --good-fg: 95 211 161;
+  --warn: 245 158 11;
+  --warn-soft: 52 40 14;
+  --warn-fg: 251 191 36;
+  --bad: 239 68 68;
+  --bad-soft: 56 24 24;
+  --bad-fg: 252 165 165;
 }
 
-body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: 'Inter', sans-serif;
-  overflow-x: hidden;
-  transition: background-color 0.3s ease, color 0.3s ease;
-}
-
-/* Glassmorphic utilities */
-.glass-panel {
-  background: var(--glass-bg);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--card-shadow);
-}
-
-.glass-card {
-  background: var(--glass-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--card-shadow);
-  border-radius: 1rem;
-}
-
-/* Animations */
-@keyframes pulse-blue {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(99, 102, 241, 0.4);
+@layer base {
+  html {
+    -webkit-tap-highlight-color: transparent;
+    color-scheme: light;
   }
-  50% {
-    transform: scale(1.05);
-    box-shadow: 0 0 0 10px rgba(99, 102, 241, 0);
+  html.dark {
+    color-scheme: dark;
+  }
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+    font-feature-settings: 'ss01', 'cv11';
+  }
+  h1, h2, h3 {
+    @apply font-display tracking-tight;
+  }
+  :focus-visible {
+    @apply outline-none ring-2 ring-brand ring-offset-2 ring-offset-canvas;
+  }
+  ::selection {
+    @apply bg-brand/20;
   }
 }
 
-.pulse-blue {
-  animation: pulse-blue 2s infinite;
-}
-
-@keyframes pulse-red {
-  0%, 100% {
-    transform: scale(1);
-    box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4);
+@layer components {
+  /* Buttons */
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold
+           transition-colors disabled:pointer-events-none disabled:opacity-50;
   }
-  50% {
-    transform: scale(1.05);
-    box-shadow: 0 0 0 10px rgba(239, 68, 68, 0);
+  .btn-primary {
+    @apply btn bg-brand text-white shadow-sm hover:bg-brand-hover;
+  }
+  .btn-secondary {
+    @apply btn border border-line bg-surface text-ink hover:bg-sunken;
+  }
+  .btn-ghost {
+    @apply btn text-muted hover:bg-sunken hover:text-ink;
+  }
+  .btn-danger {
+    @apply btn border border-bad/30 bg-surface text-bad-fg hover:bg-bad-soft;
+  }
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+  .btn-icon {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-lg text-muted transition-colors hover:bg-sunken hover:text-ink;
+  }
+
+  /* Surfaces */
+  .card {
+    @apply rounded-2xl border border-line bg-surface shadow-card;
+  }
+  .card-pad {
+    @apply card p-5 sm:p-6;
+  }
+
+  /* Forms */
+  .label {
+    @apply mb-1.5 block text-sm font-medium text-ink;
+  }
+  .hint {
+    @apply mt-1 text-xs text-muted;
+  }
+  .input {
+    @apply block w-full rounded-lg border border-line bg-surface px-3.5 py-2.5 text-sm text-ink
+           placeholder:text-muted/60 transition-colors focus:border-brand focus:outline-none focus:ring-2 focus:ring-brand/20;
+  }
+  select.input {
+    @apply pr-9;
+  }
+
+  /* Status pills */
+  .badge {
+    @apply inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-semibold;
+  }
+  .badge-good { @apply badge bg-good-soft text-good-fg; }
+  .badge-warn { @apply badge bg-warn-soft text-warn-fg; }
+  .badge-bad { @apply badge bg-bad-soft text-bad-fg; }
+  .badge-neutral { @apply badge bg-sunken text-muted; }
+
+  /* Data tables */
+  .table-wrap {
+    @apply overflow-x-auto;
+  }
+  .table {
+    @apply w-full text-left text-sm;
+  }
+  .table th {
+    @apply whitespace-nowrap border-b border-line px-4 py-3 text-xs font-semibold uppercase tracking-wide text-muted;
+  }
+  .table td {
+    @apply border-b border-line/70 px-4 py-3.5 align-middle;
+  }
+  .table tbody tr:last-child td {
+    @apply border-b-0;
   }
 }
 
-.pulse-red {
-  animation: pulse-red 2s infinite;
-}
-
-@keyframes laser-scan {
-  0%, 100% {
-    top: 5%;
+@layer utilities {
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
   }
-  50% {
-    top: 90%;
+  .tabular {
+    font-variant-numeric: tabular-nums;
   }
 }
 
-.laser-line {
-  position: absolute;
-  width: 100%;
-  height: 3px;
-  background: #0ea5e9;
-  box-shadow: 0 0 8px #0ea5e9;
-  animation: laser-scan 3s infinite linear;
+/* Scrollbars */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--line)) transparent;
 }
 
-/* Custom Scrollbar */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 3px;
-}
-
-.dark ::-webkit-scrollbar-thumb {
-  background: #475569;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-/* Print Invoice styles */
+/* Receipts print on plain white paper */
 @media print {
   body {
-    background: white !important;
-    color: black !important;
+    background: #fff !important;
+    color: #000 !important;
   }
   .no-print {
     display: none !important;
   }
-  .print-card {
+  .print-sheet {
     border: none !important;
     box-shadow: none !important;
-    background: transparent !important;
     padding: 0 !important;
-    margin: 0 !important;
   }
 }

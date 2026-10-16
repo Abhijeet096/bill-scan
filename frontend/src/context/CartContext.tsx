@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useAuth } from './AuthContext';
+import { useToast } from './ToastContext';
 import { queueOfflineOrder, getOfflineOrders, removeOfflineOrder } from '../utils/indexedDB';
 
 export interface CartItem {
@@ -37,6 +38,7 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 
 export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user, apiFetch } = useAuth();
+  const { notify } = useToast();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [subtotal, setSubtotal] = useState(0);
   const [tax, setTax] = useState(0);
@@ -108,7 +110,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (exist) {
         if (exist.quantity >= prod.stockQty) {
-          alert(`Insufficient stock. Only ${prod.stockQty} items left.`);
+          notify(`Only ${prod.stockQty} left in stock.`, 'error');
           return prev;
         }
         updated = prev.map(item =>
@@ -140,7 +142,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const qty = item.quantity + amount;
           if (qty <= 0) return null;
           if (stockLimit && qty > stockLimit) {
-            alert(`Limited stock available (${stockLimit} left).`);
+            notify(`Only ${stockLimit} left in stock.`, 'error');
             return item;
           }
           return { ...item, quantity: qty };
@@ -176,7 +178,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const applyCoupon = async (code: string, storeId: string): Promise<boolean> => {
     if (!isOnline) {
-      alert('Coupons verification requires active internet connectivity.');
+      notify('You need an internet connection to apply a coupon.', 'error');
       return false;
     }
 
@@ -189,7 +191,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const data = await res.json();
       if (!res.ok) {
-        alert(data.error || 'Failed to apply coupon.');
+        notify(data.error || 'Could not apply that coupon.', 'error');
         return false;
       }
 
@@ -232,7 +234,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       await queueOfflineOrder(offlineOrder);
       clearCart();
-      alert('Offline transaction recorded successfully. It will sync automatically once internet returns.');
+      notify('Saved offline. The order will sync once you are back online.', 'success');
       return offlineOrder;
     }
 
@@ -251,7 +253,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
       clearCart();
       return data;
     } catch (e: any) {
-      alert(e.message || 'Checkout failed.');
+      notify(e.message || 'Checkout failed. Please try again.', 'error');
       return null;
     }
   };
@@ -279,7 +281,7 @@ export const CartProvider: React.FC<{ children: React.ReactNode }> = ({ children
             await removeOfflineOrder(item.invoiceNumber);
           }
         }
-        alert('All offline orders successfully synchronized with backend database!');
+        notify('Offline orders have been synced.', 'success');
       }
     } catch (error) {
       console.error('[Offline Sync Failed] ', error);

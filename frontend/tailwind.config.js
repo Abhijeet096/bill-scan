@@ -1,55 +1,53 @@
 /** @type {import('tailwindcss').Config} */
+
+// Colours are CSS variables (see globals.css) so light/dark share one set of class names.
+const token = (name) => `rgb(var(--${name}) / <alpha-value>)`;
+
 module.exports = {
-  content: [
-    "./src/pages/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/components/**/*.{js,ts,jsx,tsx,mdx}",
-    "./src/app/**/*.{js,ts,jsx,tsx,mdx}",
-  ],
-  darkMode: 'class', // Enables class-based dark mode triggering
+  content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
+  darkMode: 'class',
   theme: {
     extend: {
       colors: {
-        background: 'var(--background)',
-        foreground: 'var(--foreground)',
-        primary: {
-          DEFAULT: '#6366f1', // Indigo primary
-          dark: '#4f46e5',
-          light: '#818cf8',
+        canvas: token('canvas'),
+        surface: token('surface'),
+        sunken: token('sunken'),
+        line: token('line'),
+        ink: token('ink'),
+        muted: token('muted'),
+        brand: {
+          DEFAULT: token('brand'),
+          hover: token('brand-hover'),
+          soft: token('brand-soft'),
+          fg: token('brand-fg'),
         },
-        accent: {
-          DEFAULT: '#0ea5e9', // Sky blue accent
-          dark: '#0284c7',
-          light: '#38bdf8',
-        },
-        surface: {
-          DEFAULT: '#1e293b', // Slate surface cards
-          light: '#f8fafc',
-          card: 'rgba(30, 41, 59, 0.7)',
-        },
-        green: {
-          DEFAULT: '#10b981', // Emerald green
-          dark: '#059669',
-        },
-        warning: {
-          DEFAULT: '#f59e0b', // Amber yellow
-        },
-        danger: {
-          DEFAULT: '#ef4444', // Red alerts
-        }
+        good: { DEFAULT: token('good'), soft: token('good-soft'), fg: token('good-fg') },
+        warn: { DEFAULT: token('warn'), soft: token('warn-soft'), fg: token('warn-fg') },
+        bad: { DEFAULT: token('bad'), soft: token('bad-soft'), fg: token('bad-fg') },
       },
       fontFamily: {
-        sans: ['Inter', 'sans-serif'],
-        outfit: ['Outfit', 'sans-serif'],
-      },
-      backdropBlur: {
-        xs: '2px',
-        md: '12px',
+        sans: ['var(--font-body)', 'system-ui', 'sans-serif'],
+        display: ['var(--font-display)', 'var(--font-body)', 'system-ui', 'sans-serif'],
       },
       boxShadow: {
-        glass: '0 8px 32px 0 rgba(0, 0, 0, 0.37)',
-        'glass-light': '0 8px 32px 0 rgba(31, 38, 135, 0.07)',
-      }
+        card: '0 1px 2px rgb(16 24 20 / 0.04), 0 1px 3px rgb(16 24 20 / 0.06)',
+        lift: '0 12px 32px -12px rgb(16 24 20 / 0.18)',
+      },
+      keyframes: {
+        'fade-up': {
+          from: { opacity: '0', transform: 'translateY(12px)' },
+          to: { opacity: '1', transform: 'translateY(0)' },
+        },
+        'scan-line': {
+          '0%, 100%': { top: '8%' },
+          '50%': { top: '88%' },
+        },
+      },
+      animation: {
+        'fade-up': 'fade-up 0.6s ease-out both',
+        'scan-line': 'scan-line 2.8s ease-in-out infinite',
+      },
     },
   },
   plugins: [],
-}
+};

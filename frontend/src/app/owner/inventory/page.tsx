@@ -1,19 +1,49 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import { useEffect, useState } from 'react';
+import { Boxes, Minus, Plus, RefreshCw, Search } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { Boxes, Search, RefreshCw, AlertTriangle } from 'lucide-react';
+import { useToast } from '../../../context/ToastContext';
+import { formatINR } from '../../../lib/plans';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { Empty, Loading } from '../../../components/ui/States';
+import type { Product } from '../../../types';
+
+function StockBadge({ product }: { product: Product }) {
+  if (product.stockQty === 0) return <span className="badge-bad">Out of stock</span>;
+  if (product.stockQty < product.reorderPoint) return <span className="badge-warn">Low stock</span>;
+  return <span className="badge-good">In stock</span>;
+}
+
+interface QuickButtonProps {
+  product: Product;
+  change: number;
+  onAdjust: (product: Product, change: number) => void;
+}
+
+function QuickButton({ product, change, onAdjust }: QuickButtonProps) {
+  return (
+    <button
+      onClick={() => onAdjust(product, change)}
+      className="btn-secondary btn-sm tabular min-w-[2.75rem] px-2"
+      aria-label={`${change > 0 ? 'Add' : 'Remove'} ${Math.abs(change)} ${product.name}`}
+    >
+      {change > 0 ? `+${change}` : change}
+    </button>
+  );
+}
 
 export default function InventoryControl() {
   const { user, apiFetch } = useAuth();
-  const [products, setProducts] = useState<any[]>([]);
+  const { notify } = useToast();
+
+  const [products, setProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
-  
-  // Custom manual inputs
-  const [adjustments, setAdjustments] = useState<{ [id: string]: string }>({});
+  // Typed-in adjustments, keyed by product id.
+  const [adjustments, setAdjustments] = useState<Record<string, string>>({});
 
-  const fetchInventory = async () => {
+  const loadInventory = async () => {
     if (!user?.storeId) return;
     setLoading(true);
     try {
@@ -30,150 +60,149 @@ export default function InventoryControl() {
   };
 
   useEffect(() => {
-    fetchInventory();
+    loadInventory();
   }, [user, search]);
 
-  const handleAdjustmentInput = (id: string, value: string) => {
-    setAdjustments(prev => ({ ...prev, [id]: value }));
-  };
-
-  const executeStockAdjust = async (prod: any, amount: number) => {
-    const nextQty = Math.max(0, prod.stockQty + amount);
+  /** Applies a +/- change to a product's stock, never dropping below zero. */
+  const adjustStock = async (product: Product, change: number): Promise<boolean> => {
     try {
-      const res = await apiFetch(`/api/products/${prod.id}`, {
+      const res = await apiFetch(`/api/products/${product.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockQty: nextQty })
-      });
-      if (res.ok) fetchInventory();
-    } catch (e) {
-      console.error(e);
-    }
-  };
-
-  const applyManualInput = async (prod: any) => {
-    const inputVal = parseInt(adjustments[prod.id]);
-    if (isNaN(inputVal)) {
-      alert('Please enter a valid stock change integer.');
-      return;
-    }
-
-    const nextQty = Math.max(0, prod.stockQty + inputVal);
-    try {
-      const res = await apiFetch(`/api/products/${prod.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stockQty: nextQty })
+        body: JSON.stringify({ stockQty: Math.max(0, product.stockQty + change) }),
       });
       if (res.ok) {
-        setAdjustments(prev => ({ ...prev, [prod.id]: '' }));
-        fetchInventory();
+        loadInventory();
+        return true;
       }
     } catch (e) {
       console.error(e);
     }
+    notify('Could not update stock.', 'error');
+    return false;
+  };
+
+  const applyTypedAdjustment = async (product: Product) => {
+    const change = parseInt(adjustments[product.id]);
+    if (isNaN(change)) {
+      notify('Enter a whole number, like 12 or -5.', 'error');
+      return;
+    }
+    if (await adjustStock(product, change)) {
+      setAdjustments((prev) => ({ ...prev, [product.id]: '' }));
+    }
   };
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Title */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold font-outfit tracking-tight">Inventory Control</h1>
-          <p className="text-sm text-text-muted mt-1">Audit, monitor stock metrics, and quick-adjust levels</p>
-        </div>
-      </div>
+    <div>
+      <PageHeader title="Inventory" description="Check stock levels and make quick adjustments." />
 
-      {/* Action Table Card */}
-      <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-xl">
-        <div className="flex flex-col sm:flex-row gap-4 justify-between items-center mb-6">
-          <div className="relative w-full sm:max-w-md flex items-center">
-            <Search className="absolute left-3 w-4 h-4 text-text-muted" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search product stock levels..."
-              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm"
-            />
+      <div className="card">
+        <div className="flex flex-col gap-3 border-b border-line p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="relative w-full sm:max-w-sm">
+            <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search products" className="input pl-10" />
           </div>
-          <button
-            onClick={fetchInventory}
-            className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-border bg-surface-light dark:bg-white/5 hover:bg-white/10 text-sm font-semibold transition-all"
-          >
-            <RefreshCw className="w-4 h-4" /> Refresh Levels
+          <button onClick={loadInventory} className="btn-secondary">
+            <RefreshCw className="h-4 w-4" /> Refresh
           </button>
         </div>
 
-        {/* Responsive Table */}
         {loading ? (
-          <div className="text-center py-12 text-text-muted text-sm">Loading stock levels...</div>
+          <Loading label="Loading stock levels…" />
         ) : products.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-left border-collapse">
-              <thead>
-                <tr className="border-b border-border text-xs font-bold text-text-muted uppercase tracking-wider">
-                  <th className="pb-4">Product details</th>
-                  <th className="pb-4">SKU Code</th>
-                  <th className="pb-4">Category</th>
-                  <th className="pb-4">Current Stock</th>
-                  <th className="pb-4">Status</th>
-                  <th className="pb-4 text-right">Manual Adjustment</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border/40">
-                {products.map((p) => {
-                  const lowStock = p.stockQty < p.reorderPoint;
-                  const outOfStock = p.stockQty === 0;
-
-                  return (
-                    <tr key={p.id} className="text-sm">
-                      <td className="py-4">
-                        <div className="font-semibold text-foreground">{p.name}</div>
-                        <div className="text-xs text-text-muted mt-0.5">Price: ₹{p.price.toFixed(2)}</div>
+          <>
+            {/* Desktop table */}
+            <div className="table-wrap hidden md:block">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Category</th>
+                    <th className="text-right">Stock</th>
+                    <th>Status</th>
+                    <th className="text-right">Adjust</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {products.map((product) => (
+                    <tr key={product.id}>
+                      <td>
+                        <p className="font-medium">{product.name}</p>
+                        <p className="font-mono text-xs text-muted">
+                          {product.sku} · {formatINR(product.price)}
+                        </p>
                       </td>
-                      <td className="py-4 font-mono text-xs">{p.sku}</td>
-                      <td className="py-4">{p.category}</td>
-                      <td className="py-4">
-                        <span className={`font-bold text-base ${lowStock ? 'text-danger' : 'text-foreground'}`}>
-                          {p.stockQty}
-                        </span>
+                      <td className="text-muted">{product.category}</td>
+                      <td className="tabular text-right font-display text-lg font-bold">{product.stockQty}</td>
+                      <td>
+                        <StockBadge product={product} />
                       </td>
-                      <td className="py-4">
-                        {outOfStock ? (
-                          <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-danger/10 text-danger pulse-red">Out of stock</span>
-                        ) : lowStock ? (
-                          <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-warning/10 text-warning">Low stock</span>
-                        ) : (
-                          <span className="px-2.5 py-1 text-[10px] font-bold rounded-full bg-green/10 text-green">In stock</span>
-                        )}
-                      </td>
-                      <td className="py-4 text-right">
+                      <td>
                         <div className="flex items-center justify-end gap-1.5">
-                          <button onClick={() => executeStockAdjust(p, -10)} className="px-2 py-1 text-xs font-bold rounded bg-surface-light dark:bg-white/5 border border-border hover:bg-white/10">-10</button>
-                          <button onClick={() => executeStockAdjust(p, -1)} className="px-2 py-1 text-xs font-bold rounded bg-surface-light dark:bg-white/5 border border-border hover:bg-white/10">-1</button>
-                          
+                          <QuickButton product={product} change={-10} onAdjust={adjustStock} />
+                          <QuickButton product={product} change={-1} onAdjust={adjustStock} />
                           <input
                             type="number"
-                            value={adjustments[p.id] || ''}
-                            onChange={(e) => handleAdjustmentInput(p.id, e.target.value)}
-                            placeholder="0"
-                            className="w-16 px-2 py-1 rounded text-center border border-border bg-background focus:outline-none focus:border-primary text-xs"
+                            value={adjustments[product.id] ?? ''}
+                            onChange={(e) => setAdjustments((prev) => ({ ...prev, [product.id]: e.target.value }))}
+                            onKeyDown={(e) => e.key === 'Enter' && applyTypedAdjustment(product)}
+                            placeholder="±"
+                            aria-label={`Custom change for ${product.name}`}
+                            className="input w-16 px-2 py-1.5 text-center text-xs"
                           />
-                          
-                          <button onClick={() => executeStockAdjust(p, 1)} className="px-2 py-1 text-xs font-bold rounded bg-surface-light dark:bg-white/5 border border-border hover:bg-white/10">+1</button>
-                          <button onClick={() => executeStockAdjust(p, 10)} className="px-2 py-1 text-xs font-bold rounded bg-surface-light dark:bg-white/5 border border-border hover:bg-white/10">+10</button>
-                          <button onClick={() => applyManualInput(p)} className="ml-2 px-3 py-1 text-xs font-bold rounded bg-primary text-white hover:bg-primary-dark">Apply</button>
+                          <button onClick={() => applyTypedAdjustment(product)} className="btn-primary btn-sm">
+                            Apply
+                          </button>
+                          <QuickButton product={product} change={1} onAdjust={adjustStock} />
+                          <QuickButton product={product} change={10} onAdjust={adjustStock} />
                         </div>
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Phone list */}
+            <ul className="divide-y divide-line md:hidden">
+              {products.map((product) => (
+                <li key={product.id} className="p-4">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{product.name}</p>
+                      <p className="font-mono text-xs text-muted">{product.sku}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="tabular font-display text-xl font-bold">{product.stockQty}</p>
+                      <StockBadge product={product} />
+                    </div>
+                  </div>
+                  <div className="mt-3 flex items-center gap-2">
+                    <button onClick={() => adjustStock(product, -1)} className="btn-secondary btn-sm" aria-label={`Remove 1 ${product.name}`}>
+                      <Minus className="h-3.5 w-3.5" />
+                    </button>
+                    <button onClick={() => adjustStock(product, 1)} className="btn-secondary btn-sm" aria-label={`Add 1 ${product.name}`}>
+                      <Plus className="h-3.5 w-3.5" />
+                    </button>
+                    <input
+                      type="number"
+                      value={adjustments[product.id] ?? ''}
+                      onChange={(e) => setAdjustments((prev) => ({ ...prev, [product.id]: e.target.value }))}
+                      placeholder="± amount"
+                      aria-label={`Custom change for ${product.name}`}
+                      className="input min-w-0 flex-1 py-1.5 text-xs"
+                    />
+                    <button onClick={() => applyTypedAdjustment(product)} className="btn-primary btn-sm">
+                      Apply
+                    </button>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </>
         ) : (
-          <div className="text-center py-12 text-text-muted text-sm">No items in inventory directory.</div>
+          <Empty icon={<Boxes className="h-5 w-5" />} title="Nothing to show" description="No products match your search." />
         )}
       </div>
     </div>

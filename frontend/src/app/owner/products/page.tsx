@@ -1,48 +1,90 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
-import { useAuth } from '../../../context/AuthContext';
-import { generateQRCodeSVG } from '../../../utils/qr';
-import { Package, Search, Plus, Edit, Eye, EyeOff, Trash2, X, Download, Tag } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Download, Eye, EyeOff, Package, Pencil, Plus, QrCode, Search, Trash2 } from 'lucide-react';
 import jsPDF from 'jspdf';
+import { useAuth } from '../../../context/AuthContext';
+import { useToast } from '../../../context/ToastContext';
+import { generateQRCodeSVG } from '../../../utils/qr';
+import { BRAND } from '../../../lib/brand';
+import { formatINR } from '../../../lib/plans';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { Modal } from '../../../components/ui/Modal';
+import { ConfirmDialog } from '../../../components/ui/ConfirmDialog';
+import { Field } from '../../../components/ui/Field';
+import { Empty, Loading } from '../../../components/ui/States';
+import type { Product, Store } from '../../../types';
+
+interface ProductForm {
+  name: string;
+  sku: string;
+  category: string;
+  price: string;
+  stockQty: string;
+  reorderPoint: string;
+  gstPercent: string;
+  discountPercent: string;
+  expiryDate: string;
+  imageUrl: string;
+  description: string;
+}
+
+const EMPTY_FORM: ProductForm = {
+  name: '',
+  sku: '',
+  category: '',
+  price: '',
+  stockQty: '',
+  reorderPoint: '10',
+  gstPercent: '18',
+  discountPercent: '0',
+  expiryDate: '',
+  imageUrl: '',
+  description: '',
+};
+
+const formFromProduct = (p: Product): ProductForm => ({
+  name: p.name,
+  sku: p.sku,
+  category: p.category,
+  price: String(p.price),
+  stockQty: String(p.stockQty),
+  reorderPoint: String(p.reorderPoint),
+  gstPercent: String(p.gstPercent),
+  discountPercent: String(p.discountPercent),
+  expiryDate: p.expiryDate ? p.expiryDate.split('T')[0] : '',
+  imageUrl: p.imageUrl ?? '',
+  description: p.description ?? '',
+});
 
 export default function ProductsDirectory() {
   const { user, apiFetch } = useAuth();
-  
-  const [products, setProducts] = useState<any[]>([]);
+  const { notify } = useToast();
+
+  const [products, setProducts] = useState<Product[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
+  const [store, setStore] = useState<Store | null>(null);
   const [loading, setLoading] = useState(true);
 
-  // Filters state
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState('all');
   const [selectedStatus, setSelectedStatus] = useState('all');
 
-  // Modal states
-  const [showProductModal, setShowProductModal] = useState(false);
-  const [showQRModal, setShowQRModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<any>(null);
+  const [editing, setEditing] = useState<Product | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState<ProductForm>(EMPTY_FORM);
+  const [qrProduct, setQrProduct] = useState<Product | null>(null);
+  const [deleting, setDeleting] = useState<Product | null>(null);
 
-  // Form states
-  const [formId, setFormId] = useState('');
-  const [name, setName] = useState('');
-  const [sku, setSku] = useState('');
-  const [category, setCategory] = useState('');
-  const [price, setPrice] = useState('');
-  const [stockQty, setStockQty] = useState('');
-  const [reorderPoint, setReorderPoint] = useState('10');
-  const [description, setDescription] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-  const [gstPercent, setGstPercent] = useState('18');
-  const [discountPercent, setDiscountPercent] = useState('0');
-  const [expiryDate, setExpiryDate] = useState('');
+  const setField = (key: keyof ProductForm) => (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) =>
+    setForm((prev) => ({ ...prev, [key]: e.target.value }));
 
-  const fetchCatalog = async () => {
+  const loadCatalog = async () => {
     if (!user?.storeId) return;
     setLoading(true);
     try {
-      const url = `/api/products?storeId=${user.storeId}&search=${encodeURIComponent(search)}&category=${selectedCategory}&status=${selectedStatus}`;
-      const res = await apiFetch(url);
+      const params = `storeId=${user.storeId}&search=${encodeURIComponent(search)}&category=${selectedCategory}&status=${selectedStatus}`;
+      const res = await apiFetch(`/api/products?${params}`);
       if (res.ok) {
         const data = await res.json();
         setProducts(data.products);
@@ -56,134 +98,101 @@ export default function ProductsDirectory() {
   };
 
   useEffect(() => {
-    fetchCatalog();
+    loadCatalog();
   }, [user, search, selectedCategory, selectedStatus]);
 
-  const handleOpenAddModal = () => {
-    setFormId('');
-    setName('');
-    setSku('');
-    setCategory('');
-    setPrice('');
-    setStockQty('');
-    setReorderPoint('10');
-    setDescription('');
-    setImageUrl('');
-    setGstPercent('18');
-    setDiscountPercent('0');
-    setExpiryDate('');
-    setSelectedProduct(null);
-    setShowProductModal(true);
+  // The store name is printed on QR labels.
+  useEffect(() => {
+    if (!user?.storeId) return;
+    apiFetch(`/api/stores/${user.storeId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(setStore)
+      .catch(console.error);
+  }, [user]);
+
+  const openAddForm = () => {
+    setEditing(null);
+    setForm(EMPTY_FORM);
+    setFormOpen(true);
   };
 
-  const handleOpenEditModal = (p: any) => {
-    setFormId(p.id);
-    setName(p.name);
-    setSku(p.sku);
-    setCategory(p.category);
-    setPrice(p.price.toString());
-    setStockQty(p.stockQty.toString());
-    setReorderPoint(p.reorderPoint.toString());
-    setDescription(p.description || '');
-    setImageUrl(p.imageUrl || '');
-    setGstPercent(p.gstPercent.toString());
-    setDiscountPercent(p.discountPercent.toString());
-    setExpiryDate(p.expiryDate ? p.expiryDate.split('T')[0] : '');
-    setSelectedProduct(p);
-    setShowProductModal(true);
+  const openEditForm = (product: Product) => {
+    setEditing(product);
+    setForm(formFromProduct(product));
+    setFormOpen(true);
   };
 
-  const handleSaveProduct = async (e: React.FormEvent) => {
+  const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     const payload = {
-      name, sku, category,
-      price: parseFloat(price),
-      stockQty: parseInt(stockQty),
-      reorderPoint: parseInt(reorderPoint),
-      description, imageUrl,
-      gstPercent: parseFloat(gstPercent),
-      discountPercent: parseFloat(discountPercent),
-      expiryDate: expiryDate || null
+      name: form.name,
+      sku: form.sku,
+      category: form.category,
+      price: parseFloat(form.price),
+      stockQty: parseInt(form.stockQty),
+      reorderPoint: parseInt(form.reorderPoint),
+      description: form.description,
+      imageUrl: form.imageUrl,
+      gstPercent: parseFloat(form.gstPercent),
+      discountPercent: parseFloat(form.discountPercent),
+      expiryDate: form.expiryDate || null,
     };
 
     try {
-      let res;
-      if (formId) {
-        res = await apiFetch(`/api/products/${formId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      } else {
-        res = await apiFetch('/api/products', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-      }
+      const res = await apiFetch(editing ? `/api/products/${editing.id}` : '/api/products', {
+        method: editing ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
 
       if (res.ok) {
-        setShowProductModal(false);
-        fetchCatalog();
-        alert('Product details successfully saved.');
+        setFormOpen(false);
+        loadCatalog();
+        notify(editing ? 'Product updated.' : 'Product added.', 'success');
       } else {
         const err = await res.json();
-        alert(err.error || 'Failed to save product details.');
+        notify(err.error || 'Could not save the product.', 'error');
       }
     } catch (e) {
       console.error(e);
+      notify('Could not save the product.', 'error');
     }
   };
 
-  const handleToggleStatus = async (p: any) => {
+  const toggleStatus = async (product: Product) => {
     try {
-      const res = await apiFetch(`/api/products/${p.id}/status`, {
+      const res = await apiFetch(`/api/products/${product.id}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ isActive: !p.isActive })
+        body: JSON.stringify({ isActive: !product.isActive }),
       });
-      if (res.ok) fetchCatalog();
+      if (res.ok) loadCatalog();
     } catch (e) {
       console.error(e);
     }
   };
 
-  const handleDeleteProduct = async (id: string) => {
-    if (!confirm('Are you sure you want to delete this product?')) return;
+  const confirmDelete = async () => {
+    if (!deleting) return;
     try {
-      const res = await apiFetch(`/api/products/${id}`, {
-        method: 'DELETE'
-      });
-      if (res.ok) fetchCatalog();
+      const res = await apiFetch(`/api/products/${deleting.id}`, { method: 'DELETE' });
+      if (res.ok) {
+        notify(`${deleting.name} deleted.`, 'success');
+        loadCatalog();
+      }
     } catch (e) {
       console.error(e);
+    } finally {
+      setDeleting(null);
     }
   };
 
-  const handlePreviewQR = (p: any) => {
-    setSelectedProduct(p);
-    setShowQRModal(true);
-  };
+  const qrPayload = (p: Product) => JSON.stringify({ v: 1, sid: user?.storeId, pid: p.id, sku: p.sku });
 
-  // Download printable PDF tag for a single item (Offline compliant jsPDF)
-  const downloadSinglePDF = (p: any) => {
-    const doc = new jsPDF({
-      orientation: 'portrait',
-      unit: 'mm',
-      format: 'a6'
-    });
-
-    const qrPayload = JSON.stringify({
-      v: 1,
-      sid: user?.storeId,
-      pid: p.id,
-      sku: p.sku
-    });
-
-    // Create a temporary canvas to draw the SVG QR and get PNG data
-    const svgStr = generateQRCodeSVG(qrPayload);
-    const blob = new Blob([svgStr], { type: 'image/svg+xml' });
-    const url = URL.createObjectURL(blob);
+  // Builds an A6 label with the QR code and downloads it as a PDF.
+  const downloadLabel = (product: Product) => {
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a6' });
+    const url = URL.createObjectURL(new Blob([generateQRCodeSVG(qrPayload(product))], { type: 'image/svg+xml' }));
     const img = new Image();
     img.src = url;
 
@@ -192,272 +201,219 @@ export default function ProductsDirectory() {
       canvas.width = 300;
       canvas.height = 300;
       const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#ffffff';
-        ctx.fillRect(0, 0, 300, 300);
-        ctx.drawImage(img, 10, 10, 280, 280);
-        const imgData = canvas.toDataURL('image/png');
+      if (!ctx) return;
 
-        // Draw Card Border
-        doc.setDrawColor(99, 102, 241);
-        doc.setLineWidth(1);
-        doc.rect(5, 5, 95, 138);
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, 300, 300);
+      ctx.drawImage(img, 10, 10, 280, 280);
 
-        // Header Title
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(14);
-        doc.setTextColor(15, 23, 42);
-        doc.text('Kumar Digital Mart', 52.5, 20, { align: 'center' });
+      doc.setDrawColor(15, 138, 92);
+      doc.setLineWidth(1);
+      doc.rect(5, 5, 95, 138);
 
-        doc.setDrawColor(226, 232, 240);
-        doc.setLineWidth(0.5);
-        doc.line(15, 26, 90, 26);
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(20, 24, 31);
+      doc.text(store?.name ?? BRAND.name, 52.5, 20, { align: 'center' });
 
-        // Render QR Image
-        doc.addImage(imgData, 'PNG', 20, 32, 65, 65);
+      doc.setDrawColor(231, 230, 223);
+      doc.setLineWidth(0.5);
+      doc.line(15, 26, 90, 26);
 
-        // Detail texts
-        doc.setFontSize(12);
-        doc.text(p.name, 52.5, 108, { align: 'center' });
+      doc.addImage(canvas.toDataURL('image/png'), 'PNG', 20, 32, 65, 65);
 
-        doc.setFont('helvetica', 'normal');
-        doc.setFontSize(9);
-        doc.setTextColor(100, 116, 139);
-        doc.text(`SKU: ${p.sku}`, 52.5, 116, { align: 'center' });
+      doc.setFontSize(12);
+      doc.text(product.name, 52.5, 108, { align: 'center' });
 
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(14);
-        doc.setTextColor(16, 185, 129);
-        doc.text(`Price: Rs. ${p.price.toFixed(2)}`, 52.5, 128, { align: 'center' });
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(9);
+      doc.setTextColor(95, 102, 114);
+      doc.text(`SKU: ${product.sku}`, 52.5, 116, { align: 'center' });
 
-        doc.save(`QR_${p.sku}.pdf`);
-        URL.revokeObjectURL(url);
-      }
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(14);
+      doc.setTextColor(15, 138, 92);
+      doc.text(`Rs. ${product.price.toFixed(2)}`, 52.5, 128, { align: 'center' });
+
+      doc.save(`QR_${product.sku}.pdf`);
+      URL.revokeObjectURL(url);
     };
   };
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Title Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold font-outfit tracking-tight">Products Directory</h1>
-          <p className="text-sm text-text-muted mt-1">Configure and manage your inventory catalog</p>
-        </div>
-        <button
-          onClick={handleOpenAddModal}
-          className="flex items-center justify-center gap-1.5 px-4 py-2.5 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/25 hover:bg-primary-dark transition-all"
-        >
-          <Plus className="w-4 h-4" /> Add Product
-        </button>
-      </div>
+    <div>
+      <PageHeader
+        title="Products"
+        description="Your catalog. Every product gets its own QR label."
+        actions={
+          <button onClick={openAddForm} className="btn-primary">
+            <Plus className="h-4 w-4" /> Add product
+          </button>
+        }
+      />
 
-      {/* Filters bar */}
-      <div className="p-4 rounded-2xl bg-surface-card border border-border flex flex-col md:flex-row gap-4 items-center shadow-md">
-        <div className="relative flex-1 w-full flex items-center">
-          <Search className="absolute left-3 w-4 h-4 text-text-muted" />
+      <div className="card mb-6 flex flex-col gap-3 p-4 md:flex-row">
+        <div className="relative flex-1">
+          <Search className="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
           <input
-            type="text"
+            type="search"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name, SKU or category..."
-            className="w-full pl-10 pr-4 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm"
+            placeholder="Search by name, SKU or category"
+            className="input pl-10"
           />
         </div>
-        
-        <div className="flex gap-4 w-full md:w-auto">
-          <select
-            value={selectedCategory}
-            onChange={(e) => setSelectedCategory(e.target.value)}
-            className="flex-1 md:w-44 px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm"
-          >
-            <option value="all">All Categories</option>
-            {categories.map(c => <option key={c} value={c}>{c}</option>)}
+        <div className="grid grid-cols-2 gap-3 md:w-96">
+          <select value={selectedCategory} onChange={(e) => setSelectedCategory(e.target.value)} className="input" aria-label="Category">
+            <option value="all">All categories</option>
+            {categories.map((c) => (
+              <option key={c} value={c}>
+                {c}
+              </option>
+            ))}
           </select>
-
-          <select
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="flex-1 md:w-44 px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-sm"
-          >
-            <option value="all">All Statuses</option>
-            <option value="active">Enabled Only</option>
-            <option value="disabled">Disabled Only</option>
+          <select value={selectedStatus} onChange={(e) => setSelectedStatus(e.target.value)} className="input" aria-label="Status">
+            <option value="all">All statuses</option>
+            <option value="active">Enabled</option>
+            <option value="disabled">Disabled</option>
           </select>
         </div>
       </div>
 
-      {/* Products catalog list grid */}
       {loading ? (
-        <div className="text-center py-12 text-text-muted text-sm">Loading catalog directory...</div>
+        <Loading label="Loading products…" />
       ) : products.length > 0 ? (
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-          {products.map((p) => {
-            const lowStock = p.stockQty < p.reorderPoint;
-            const qrPayload = JSON.stringify({ v: 1, sid: user?.storeId, pid: p.id, sku: p.sku });
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+          {products.map((product) => {
+            const lowStock = product.stockQty < product.reorderPoint;
             return (
-              <div key={p.id} className={`flex flex-col justify-between p-5 rounded-2xl glass-card border border-white/5 shadow-lg ${!p.isActive ? 'opacity-60' : ''}`}>
-                <div>
-                  <div className="flex items-center justify-between mb-4">
-                    <span className="px-2 py-0.5 rounded-lg bg-surface-light dark:bg-white/5 border border-border text-[10px] font-bold tracking-wide uppercase text-primary">
-                      {p.category}
-                    </span>
-                    <span className={`px-2 py-0.5 rounded-lg text-[10px] font-bold ${lowStock ? 'bg-danger/10 text-danger' : 'bg-green/10 text-green'}`}>
-                      Stock: {p.stockQty}
-                    </span>
-                  </div>
-
-                  <h3 className="font-bold text-lg font-outfit text-foreground leading-snug">{p.name}</h3>
-                  <p className="text-xs text-text-muted font-mono mt-1">SKU: {p.sku}</p>
-
-                  <div className="mt-4 flex items-center justify-between">
-                    <span className="text-xl font-bold font-outfit text-green">₹{p.price.toFixed(2)}</span>
-                    <span className="text-[10px] text-text-muted">GST: {p.gstPercent}%</span>
-                  </div>
+              <article key={product.id} className={`card flex flex-col p-5 ${product.isActive ? '' : 'opacity-60'}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="badge-neutral">{product.category}</span>
+                  <span className={lowStock ? 'badge-bad' : 'badge-good'}>{product.stockQty} in stock</span>
                 </div>
 
-                <div className="flex items-center gap-2 mt-6 border-t border-border/40 pt-4">
-                  <button
-                    onClick={() => handleOpenEditModal(p)}
-                    className="flex-1 flex items-center justify-center gap-1 py-2 text-xs font-semibold rounded-xl bg-surface-light dark:bg-white/5 hover:bg-white/10 border border-border"
-                  >
-                    <Edit className="w-3.5 h-3.5" /> Edit
+                <h3 className="mt-4 text-lg font-semibold leading-snug">{product.name}</h3>
+                <p className="mt-0.5 font-mono text-xs text-muted">{product.sku}</p>
+
+                <div className="mt-4 flex items-baseline justify-between">
+                  <p className="tabular font-display text-2xl font-bold">{formatINR(product.price)}</p>
+                  <p className="text-xs text-muted">GST {product.gstPercent}%</p>
+                </div>
+
+                <div className="mt-5 flex items-center gap-2 border-t border-line pt-4">
+                  <button onClick={() => openEditForm(product)} className="btn-secondary btn-sm flex-1">
+                    <Pencil className="h-3.5 w-3.5" /> Edit
+                  </button>
+                  <button onClick={() => setQrProduct(product)} className="btn-icon border border-line" aria-label={`QR label for ${product.name}`}>
+                    <QrCode className="h-4 w-4" />
                   </button>
                   <button
-                    onClick={() => handlePreviewQR(p)}
-                    className="px-3 py-2 text-xs font-semibold rounded-xl bg-primary/10 text-primary hover:bg-primary hover:text-white transition-colors"
-                    title="View QR Barcode"
+                    onClick={() => toggleStatus(product)}
+                    className="btn-icon border border-line"
+                    aria-label={product.isActive ? `Disable ${product.name}` : `Enable ${product.name}`}
                   >
-                    <Tag className="w-4 h-4" />
+                    {product.isActive ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                   </button>
-                  <button
-                    onClick={() => handleToggleStatus(p)}
-                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-border hover:bg-surface-light dark:hover:bg-white/5"
-                    title={p.isActive ? 'Disable product' : 'Enable product'}
-                  >
-                    {p.isActive ? <EyeOff className="w-4 h-4 text-warning" /> : <Eye className="w-4 h-4 text-green" />}
-                  </button>
-                  <button
-                    onClick={() => handleDeleteProduct(p.id)}
-                    className="px-3 py-2 text-xs font-semibold rounded-xl border border-danger/20 text-danger hover:bg-danger/10"
-                    title="Delete product"
-                  >
-                    <Trash2 className="w-4 h-4" />
+                  <button onClick={() => setDeleting(product)} className="btn-icon border border-line hover:text-bad-fg" aria-label={`Delete ${product.name}`}>
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </div>
-              </div>
+              </article>
             );
           })}
         </div>
       ) : (
-        <div className="text-center py-12 text-text-muted text-sm bg-surface-card border border-border rounded-2xl shadow-inner">
-          No inventory products found matching the criteria.
+        <div className="card">
+          <Empty
+            icon={<Package className="h-5 w-5" />}
+            title="No products found"
+            description="Try a different search, or add your first product."
+            action={
+              <button onClick={openAddForm} className="btn-primary">
+                <Plus className="h-4 w-4" /> Add product
+              </button>
+            }
+          />
         </div>
       )}
 
-      {/* MODAL: Add / Edit product */}
-      {showProductModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/60 backdrop-blur-sm">
-          <div className="w-full max-w-lg p-6 rounded-3xl glass-card border border-white/5 shadow-2xl overflow-y-auto max-h-[90vh]">
-            <div className="flex items-center justify-between pb-4 border-b border-border">
-              <h3 className="text-xl font-bold font-outfit">{formId ? 'Edit Catalog Product' : 'Add New Product'}</h3>
-              <button onClick={() => setShowProductModal(false)} className="p-1 rounded-lg text-text-muted hover:text-foreground">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <form onSubmit={handleSaveProduct} className="mt-6 space-y-4">
-              <div className="grid gap-4 sm:grid-cols-2">
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">Product Name *</label>
-                  <input type="text" required value={name} onChange={(e) => setName(e.target.value)} placeholder="Wireless Mouse" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">SKU / Barcode ID *</label>
-                  <input type="text" required value={sku} onChange={(e) => setSku(e.target.value)} placeholder="MOUSE-WL-101" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">Price (₹) *</label>
-                  <input type="number" step="0.01" required value={price} onChange={(e) => setPrice(e.target.value)} placeholder="1499.00" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">Stock Quantity *</label>
-                  <input type="number" required value={stockQty} onChange={(e) => setStockQty(e.target.value)} placeholder="45" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">Category *</label>
-                  <input type="text" required value={category} onChange={(e) => setCategory(e.target.value)} placeholder="Electronics" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">Reorder Alert Threshold</label>
-                  <input type="number" required value={reorderPoint} onChange={(e) => setReorderPoint(e.target.value)} placeholder="10" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">GST Tax (%)</label>
-                  <input type="number" step="0.1" required value={gstPercent} onChange={(e) => setGstPercent(e.target.value)} placeholder="18.0" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-                <div className="space-y-1">
-                  <label className="text-xs font-bold text-text-muted uppercase">Discount (%)</label>
-                  <input type="number" step="0.1" required value={discountPercent} onChange={(e) => setDiscountPercent(e.target.value)} placeholder="0.0" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-                </div>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Image URL</label>
-                <input type="url" value={imageUrl} onChange={(e) => setImageUrl(e.target.value)} placeholder="https://images.unsplash.com/... (optional)" className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Expiry Date</label>
-                <input type="date" value={expiryDate} onChange={(e) => setExpiryDate(e.target.value)} className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-text-muted uppercase">Description</label>
-                <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Brief details about item specs..." className="w-full px-3 py-2 rounded-xl border border-border bg-background/50 focus:outline-none focus:border-primary text-sm" />
-              </div>
-
-              <div className="flex justify-end gap-3 border-t border-border pt-4">
-                <button type="button" onClick={() => setShowProductModal(false)} className="px-4 py-2 rounded-xl border border-border hover:bg-surface-light dark:hover:bg-white/5 text-sm font-semibold">Cancel</button>
-                <button type="submit" className="px-4 py-2 rounded-xl bg-primary text-white font-bold text-sm shadow-md hover:bg-primary-dark">Save Product</button>
-              </div>
-            </form>
+      <Modal open={formOpen} onClose={() => setFormOpen(false)} title={editing ? 'Edit product' : 'Add product'}>
+        <form onSubmit={handleSave} className="space-y-4">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Product name">
+              <input required value={form.name} onChange={setField('name')} placeholder="Wireless mouse" className="input" />
+            </Field>
+            <Field label="SKU" hint="Unique code printed on the label.">
+              <input required value={form.sku} onChange={setField('sku')} placeholder="MOUSE-WL-101" className="input" />
+            </Field>
+            <Field label="Price (₹)">
+              <input type="number" step="0.01" min="0" required value={form.price} onChange={setField('price')} placeholder="1499" className="input" />
+            </Field>
+            <Field label="Stock quantity">
+              <input type="number" min="0" required value={form.stockQty} onChange={setField('stockQty')} placeholder="45" className="input" />
+            </Field>
+            <Field label="Category">
+              <input required value={form.category} onChange={setField('category')} placeholder="Electronics" className="input" />
+            </Field>
+            <Field label="Low-stock alert at">
+              <input type="number" min="0" required value={form.reorderPoint} onChange={setField('reorderPoint')} className="input" />
+            </Field>
+            <Field label="GST (%)">
+              <input type="number" step="0.1" min="0" required value={form.gstPercent} onChange={setField('gstPercent')} className="input" />
+            </Field>
+            <Field label="Discount (%)">
+              <input type="number" step="0.1" min="0" required value={form.discountPercent} onChange={setField('discountPercent')} className="input" />
+            </Field>
           </div>
-        </div>
-      )}
 
-      {/* MODAL: QR code preview */}
-      {showQRModal && selectedProduct && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/60 backdrop-blur-sm">
-          <div className="w-full max-w-sm p-6 rounded-3xl glass-card border border-white/5 shadow-2xl text-center">
-            <div className="flex items-center justify-between pb-4 border-b border-border mb-6">
-              <h3 className="text-lg font-bold font-outfit">Product Tag QR</h3>
-              <button onClick={() => setShowQRModal(false)} className="p-1 rounded-lg text-text-muted hover:text-foreground">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            
-            <h2 className="text-xl font-bold font-outfit text-foreground">{selectedProduct.name}</h2>
-            <p className="text-xs text-text-muted font-mono mt-1">SKU: {selectedProduct.sku}</p>
-            <p className="text-lg font-extrabold text-green mt-2">Price: ₹{selectedProduct.price.toFixed(2)}</p>
+          <Field label="Image URL (optional)">
+            <input type="url" value={form.imageUrl} onChange={setField('imageUrl')} placeholder="https://…" className="input" />
+          </Field>
+          <Field label="Expiry date (optional)">
+            <input type="date" value={form.expiryDate} onChange={setField('expiryDate')} className="input" />
+          </Field>
+          <Field label="Description (optional)">
+            <textarea rows={3} value={form.description} onChange={setField('description')} className="input" />
+          </Field>
 
-            {/* Offline SVG QR injection */}
-            <div 
-              className="w-48 h-48 mx-auto my-6 p-3 bg-white rounded-2xl flex items-center justify-center shadow-inner"
-              dangerouslySetInnerHTML={{
-                __html: generateQRCodeSVG(JSON.stringify({ v: 1, sid: user?.storeId, pid: selectedProduct.id, sku: selectedProduct.sku }))
-              }}
-            />
-
-            <button
-              onClick={() => downloadSinglePDF(selectedProduct)}
-              className="w-full flex items-center justify-center gap-1.5 py-3 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary-dark transition-colors"
-            >
-              <Download className="w-4 h-4" /> Download PDF Label
+          <div className="flex justify-end gap-2 border-t border-line pt-4">
+            <button type="button" onClick={() => setFormOpen(false)} className="btn-secondary">
+              Cancel
+            </button>
+            <button type="submit" className="btn-primary">
+              Save product
             </button>
           </div>
-        </div>
-      )}
+        </form>
+      </Modal>
+
+      <Modal open={!!qrProduct} onClose={() => setQrProduct(null)} title="QR label" width="sm:max-w-sm">
+        {qrProduct && (
+          <div className="text-center">
+            <p className="text-lg font-semibold">{qrProduct.name}</p>
+            <p className="mt-0.5 font-mono text-xs text-muted">{qrProduct.sku}</p>
+            <p className="tabular mt-2 font-display text-xl font-bold">{formatINR(qrProduct.price)}</p>
+
+            <div
+              className="mx-auto my-5 h-48 w-48 rounded-2xl border border-line bg-white p-3"
+              dangerouslySetInnerHTML={{ __html: generateQRCodeSVG(qrPayload(qrProduct)) }}
+            />
+
+            <button onClick={() => downloadLabel(qrProduct)} className="btn-primary w-full">
+              <Download className="h-4 w-4" /> Download PDF label
+            </button>
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={!!deleting}
+        title="Delete product?"
+        message={`"${deleting?.name}" will be removed from your catalog.`}
+        onConfirm={confirmDelete}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
   );
 }

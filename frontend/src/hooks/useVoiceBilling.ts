@@ -1,8 +1,9 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useCart } from '../context/CartContext';
 import { useAuth } from '../context/AuthContext';
+import { useToast } from '../context/ToastContext';
 
 interface UseVoiceBillingProps {
   products: any[];
@@ -12,47 +13,45 @@ interface UseVoiceBillingProps {
 export const useVoiceBilling = ({ products, onCheckoutTrigger }: UseVoiceBillingProps) => {
   const { addToCart, adjustQuantity, removeFromCart } = useCart();
   const { apiFetch } = useAuth();
+  const { notify } = useToast();
   const [isListening, setIsListening] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [recognition, setRecognition] = useState<any>(null);
 
+  // The recognizer is created once. It calls through this ref so it always runs
+  // the latest handler without being rebuilt on every render.
+  const handleResult = useRef<(text: string) => Promise<void>>(async () => {});
+
   useEffect(() => {
-    // Initialize Web Speech API
     const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-    
-    if (SpeechRecognition) {
-      const rec = new SpeechRecognition();
-      rec.continuous = false;
-      rec.interimResults = false;
-      rec.maxAlternatives = 1;
+    if (!SpeechRecognition) return;
 
-      rec.onstart = () => {
-        setIsListening(true);
-        setTranscript('');
-      };
+    const rec = new SpeechRecognition();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.maxAlternatives = 1;
 
-      rec.onend = () => {
-        setIsListening(false);
-      };
+    rec.onstart = () => {
+      setIsListening(true);
+      setTranscript('');
+    };
+    rec.onend = () => setIsListening(false);
+    rec.onerror = (event: any) => {
+      console.error('Speech recognition error: ', event.error);
+      setIsListening(false);
+    };
+    rec.onresult = async (event: any) => {
+      const text = event.results[0][0].transcript;
+      setTranscript(text);
+      await handleResult.current(text);
+    };
 
-      rec.onerror = (event: any) => {
-        console.error('Speech recognition error: ', event.error);
-        setIsListening(false);
-      };
-
-      rec.onresult = async (event: any) => {
-        const text = event.results[0][0].transcript;
-        setTranscript(text);
-        await processVoiceCommand(text);
-      };
-
-      setRecognition(rec);
-    }
-  }, [products, addToCart, adjustQuantity, removeFromCart, onCheckoutTrigger]);
+    setRecognition(rec);
+  }, []);
 
   const startListening = (lang: string = 'en-US') => {
     if (!recognition) {
-      alert('Speech Recognition is not supported by your browser.');
+      notify('Voice input is not supported in this browser.', 'error');
       return;
     }
     
@@ -92,7 +91,7 @@ export const useVoiceBilling = ({ products, onCheckoutTrigger }: UseVoiceBilling
       }
 
       if (command.action === 'UNKNOWN' || !command.productQuery) {
-        alert(`Command not understood: "${text}"`);
+        notify(`Sorry, I didn't understand "${text}".`, 'error');
         return;
       }
 
@@ -105,7 +104,7 @@ export const useVoiceBilling = ({ products, onCheckoutTrigger }: UseVoiceBilling
       );
 
       if (!matchedProduct) {
-        alert(`Product "${command.productQuery}" not found in store catalog.`);
+        notify(`"${command.productQuery}" isn't in this store's catalog.`, 'error');
         return;
       }
 
@@ -122,11 +121,13 @@ export const useVoiceBilling = ({ products, onCheckoutTrigger }: UseVoiceBilling
     }
   };
 
+  handleResult.current = processVoiceCommand;
+
   return {
     isListening,
     transcript,
     startListening,
     stopListening,
-    hasSupport: !!(typeof window !== 'undefined' && ((window as any).SpeechRecognition || (window as any).webkitSpeechRecognition))
+    hasSupport: !!recognition,
   };
 };

@@ -1,115 +1,118 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import { ChevronRight, History, ReceiptText, ScanLine, ShoppingCart } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
 import { useCart } from '../../../context/CartContext';
-import { ScanLine, ShoppingCart, History, ChevronRight } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { formatINR } from '../../../lib/plans';
+import { Empty } from '../../../components/ui/States';
+import type { Order } from '../../../types';
 
 export default function CustomerHome() {
-  const router = useRouter();
   const { user, apiFetch } = useAuth();
   const { cart } = useCart();
-  const [historyCount, setHistoryCount] = useState(0);
-  const [recentOrders, setRecentOrders] = useState<any[]>([]);
+  const [orderCount, setOrderCount] = useState(0);
+  const [recentOrders, setRecentOrders] = useState<Order[]>([]);
 
   useEffect(() => {
-    const fetchHistory = async () => {
-      if (!user) return;
+    if (!user) return;
+    const loadHistory = async () => {
       try {
         const res = await apiFetch(`/api/orders?customerId=${user.id}&limit=3`);
         if (res.ok) {
           const data = await res.json();
-          setHistoryCount(data.pagination.totalCount);
+          setOrderCount(data.pagination.totalCount);
           setRecentOrders(data.orders);
         }
       } catch (e) {
         console.error(e);
       }
     };
-    fetchHistory();
+    loadHistory();
   }, [user]);
 
-  const totalCartItems = cart.reduce((s, item) => s + item.quantity, 0);
+  const cartCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const firstName = user?.name.split(' ')[0];
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Greeting banner */}
+    <div className="space-y-6">
       <div>
-        <h1 className="text-3xl font-extrabold font-outfit tracking-tight">Hello, Shopper!</h1>
-        <p className="text-sm text-text-muted mt-1">Scan product QR tags around the store to instantly compile and pay your bill.</p>
+        <h1 className="text-3xl font-bold">Hi{firstName ? `, ${firstName}` : ''}</h1>
+        <p className="mt-1 text-muted">Scan a product label to add it to your bill.</p>
       </div>
 
-      {/* Camera shortcut */}
-      <motion.div
-        whileTap={{ scale: 0.98 }}
-        onClick={() => router.push('/customer/scanner')}
-        className="p-6 rounded-3xl bg-primary text-white shadow-xl shadow-primary/20 flex items-center justify-between cursor-pointer pulse-blue"
+      <Link
+        href="/customer/scanner"
+        className="group flex items-center justify-between gap-4 rounded-2xl bg-brand p-5 text-white shadow-lift transition-colors hover:bg-brand-hover"
       >
         <div className="flex items-center gap-4">
-          <div className="w-12 h-12 rounded-2xl bg-white/20 flex items-center justify-center">
-            <ScanLine className="w-6 h-6" />
-          </div>
+          <span className="flex h-12 w-12 items-center justify-center rounded-xl bg-white/15">
+            <ScanLine className="h-6 w-6" />
+          </span>
           <div>
-            <h3 className="font-bold text-lg font-outfit">Open Quick Scanner</h3>
-            <p className="text-xs text-white/80 mt-0.5">Scan product tags to add directly to your cart</p>
+            <p className="font-display text-lg font-semibold">Scan a product</p>
+            <p className="text-sm text-white/80">Point your camera at a QR label</p>
           </div>
         </div>
-        <ChevronRight className="w-5 h-5 opacity-80" />
-      </motion.div>
+        <ChevronRight className="h-5 w-5 transition-transform group-hover:translate-x-0.5" />
+      </Link>
 
-      {/* Grid stats */}
-      <div className="grid gap-4 grid-cols-2">
-        <div
-          onClick={() => router.push('/customer/cart')}
-          className="p-4 rounded-2xl bg-surface-card border border-border flex items-center gap-3 cursor-pointer hover:bg-white/5"
-        >
-          <div className="p-2.5 bg-accent/10 text-accent rounded-xl"><ShoppingCart className="w-5 h-5" /></div>
+      <div className="grid grid-cols-2 gap-3">
+        <Link href="/customer/cart" className="card flex items-center gap-3 p-4 transition-colors hover:bg-sunken">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-soft text-brand-fg">
+            <ShoppingCart className="h-5 w-5" />
+          </span>
           <div>
-            <h4 className="text-base font-bold font-outfit">{totalCartItems} Items</h4>
-            <span className="text-[10px] text-text-muted">Active Cart</span>
+            <p className="tabular font-display text-xl font-bold leading-none">{cartCount}</p>
+            <p className="mt-1 text-xs text-muted">{cartCount === 1 ? 'item in cart' : 'items in cart'}</p>
           </div>
-        </div>
-
-        <div
-          onClick={() => router.push('/customer/history')}
-          className="p-4 rounded-2xl bg-surface-card border border-border flex items-center gap-3 cursor-pointer hover:bg-white/5"
-        >
-          <div className="p-2.5 bg-green/10 text-green rounded-xl"><History className="w-5 h-5" /></div>
+        </Link>
+        <Link href="/customer/history" className="card flex items-center gap-3 p-4 transition-colors hover:bg-sunken">
+          <span className="flex h-10 w-10 items-center justify-center rounded-lg bg-brand-soft text-brand-fg">
+            <History className="h-5 w-5" />
+          </span>
           <div>
-            <h4 className="text-base font-bold font-outfit">{historyCount} Receipts</h4>
-            <span className="text-[10px] text-text-muted">Purchase History</span>
+            <p className="tabular font-display text-xl font-bold leading-none">{orderCount}</p>
+            <p className="mt-1 text-xs text-muted">{orderCount === 1 ? 'receipt' : 'receipts'}</p>
           </div>
-        </div>
+        </Link>
       </div>
 
-      {/* Recent Purchases */}
-      <div className="p-5 rounded-3xl glass-card border border-white/5 shadow-xl">
-        <h3 className="text-base font-bold font-outfit mb-4">My Recent Transactions</h3>
+      <section className="card">
+        <div className="flex items-center justify-between px-5 pt-5">
+          <h2 className="text-lg font-semibold">Recent purchases</h2>
+          {recentOrders.length > 0 && (
+            <Link href="/customer/history" className="text-sm font-medium text-brand-fg hover:underline">
+              View all
+            </Link>
+          )}
+        </div>
+
         {recentOrders.length > 0 ? (
-          <div className="space-y-3.5">
-            {recentOrders.map((o) => (
-              <div
-                key={o.id}
-                onClick={() => router.push(`/customer/receipt?id=${o.id}`)}
-                className="flex items-center justify-between p-3.5 rounded-2xl bg-background/50 border border-border cursor-pointer hover:border-primary/40 transition-colors"
-              >
-                <div>
-                  <h4 className="font-bold text-xs">{o.invoiceNumber}</h4>
-                  <p className="text-[10px] text-text-muted mt-0.5">Date: {new Date(o.createdAt).toLocaleDateString()}</p>
-                </div>
-                <div className="flex items-center gap-1">
-                  <span className="text-sm font-extrabold text-green">₹{o.total.toFixed(2)}</span>
-                  <ChevronRight className="w-4 h-4 text-text-muted" />
-                </div>
-              </div>
+          <ul className="mt-2 divide-y divide-line">
+            {recentOrders.map((order) => (
+              <li key={order.id}>
+                <Link
+                  href={`/customer/receipt?id=${order.id}`}
+                  className="flex items-center justify-between gap-3 px-5 py-4 transition-colors hover:bg-sunken"
+                >
+                  <div>
+                    <p className="text-sm font-semibold">{order.invoiceNumber}</p>
+                    <p className="text-xs text-muted">{new Date(order.createdAt).toLocaleDateString([], { dateStyle: 'medium' })}</p>
+                  </div>
+                  <div className="flex items-center gap-1.5">
+                    <span className="tabular text-sm font-semibold">{formatINR(order.total)}</span>
+                    <ChevronRight className="h-4 w-4 text-muted" />
+                  </div>
+                </Link>
+              </li>
             ))}
-          </div>
+          </ul>
         ) : (
-          <p className="text-center text-xs text-text-muted py-6">No purchases yet. Start shopping!</p>
+          <Empty icon={<ReceiptText className="h-5 w-5" />} title="No purchases yet" description="Your receipts will show up here after your first order." />
         )}
-      </div>
+      </section>
     </div>
   );
 }

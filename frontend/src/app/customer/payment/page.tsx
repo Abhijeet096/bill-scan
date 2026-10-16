@@ -1,18 +1,22 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { CheckCircle2, FlaskConical, ShieldCheck, Smartphone, XCircle } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { useCart } from '../../../context/CartContext';
+import { useToast } from '../../../context/ToastContext';
 import { generateQRCodeSVG } from '../../../utils/qr';
-import { ArrowLeft, ShieldCheck, Smartphone, CheckCircle, XCircle, Terminal } from 'lucide-react';
+import { formatINR } from '../../../lib/plans';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { Loading } from '../../../components/ui/States';
+import type { Order, Store } from '../../../types';
 
 export default function CustomerPayment() {
   const router = useRouter();
   const { user, apiFetch } = useAuth();
-  const { isOnline } = useCart();
-  const [store, setStore] = useState<any>(null);
-  const [order, setOrder] = useState<any>(null);
+  const { notify } = useToast();
+  const [store, setStore] = useState<Store | null>(null);
+  const [order, setOrder] = useState<Order | null>(null);
   const [loading, setLoading] = useState(true);
   const [verifying, setVerifying] = useState(false);
 
@@ -23,23 +27,15 @@ export default function CustomerPayment() {
       return;
     }
 
-    const fetchDetails = async () => {
+    const loadDetails = async () => {
       setLoading(true);
       try {
-        // 1. Fetch Order details
         const orderRes = await apiFetch(`/api/orders/${orderId}`);
-        if (orderRes.ok) {
-          const orderData = await orderRes.json();
-          setOrder(orderData);
-        }
+        if (orderRes.ok) setOrder(await orderRes.json());
 
-        // 2. Fetch Store gateway
         if (user?.storeId) {
           const storeRes = await apiFetch(`/api/stores/${user.storeId}`);
-          if (storeRes.ok) {
-            const storeData = await storeRes.json();
-            setStore(storeData);
-          }
+          if (storeRes.ok) setStore(await storeRes.json());
         }
       } catch (e) {
         console.error(e);
@@ -48,128 +44,92 @@ export default function CustomerPayment() {
       }
     };
 
-    fetchDetails();
+    loadDetails();
   }, [user]);
 
-  if (loading) {
-    return <div className="text-center py-12 text-text-muted">Loading secure billing gateway...</div>;
-  }
+  if (loading) return <Loading label="Preparing secure payment…" />;
 
   if (!order || !store) {
-    return <div className="text-center py-12 text-danger">Failed to load order parameters.</div>;
+    return (
+      <div>
+        <PageHeader title="Payment" backHref="/customer/checkout" />
+        <div className="card p-6 text-center text-sm text-bad-fg">We couldn&apos;t load this order. Go back and try again.</div>
+      </div>
+    );
   }
 
-  // Construct dynamic UPI deep link (Feature 4 compliance)
-  // Format: upi://pay?pa=VPA&pn=NAME&am=AMOUNT&tn=INVOICE&cu=INR
-  const upiDeepLink = `upi://pay?pa=${store.paymentUpiId}&pn=${encodeURIComponent(store.merchantName)}&am=${order.total.toFixed(2)}&tn=${order.invoiceNumber}&cu=INR`;
+  // upi://pay?pa=<VPA>&pn=<name>&am=<amount>&tn=<note>&cu=INR
+  const upiLink = `upi://pay?pa=${store.paymentUpiId}&pn=${encodeURIComponent(store.merchantName)}&am=${order.total.toFixed(2)}&tn=${order.invoiceNumber}&cu=INR`;
 
-  // Sandbox simulation triggers
-  const handlePaymentCallback = async (success: boolean) => {
+  // Stands in for the payment gateway callback while the project runs against a sandbox.
+  const settlePayment = async (success: boolean) => {
     setVerifying(true);
     try {
       const res = await apiFetch(`/api/orders/${order.id}/simulate-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          success,
-          txRef: success ? `UPI-SANDBOX-${Date.now()}` : undefined
-        })
+        body: JSON.stringify({ success, txRef: success ? `UPI-SANDBOX-${Date.now()}` : undefined }),
       });
-
       const data = await res.json();
-      setVerifying(false);
 
       if (success && res.ok) {
-        alert('Payment verified! Redirecting to receipt page.');
+        notify('Payment confirmed.', 'success');
         sessionStorage.setItem('last_successful_order_id', order.id);
         router.push(`/customer/receipt?id=${order.id}`);
       } else {
-        alert(data.message || 'Payment simulation failed.');
+        notify(data.message || 'Payment did not go through.', 'error');
         if (!success) router.push('/customer/cart');
       }
     } catch (e) {
       console.error(e);
+      notify('Could not verify the payment. Please try again.', 'error');
+    } finally {
       setVerifying(false);
     }
   };
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-border">
-        <button onClick={() => router.push('/customer/checkout')} className="p-2 rounded-xl bg-surface-light dark:bg-white/5 border border-border">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h2 className="text-xl font-bold font-outfit">Secure Checkout</h2>
-        <div className="w-9 h-9"></div>
-      </div>
+    <div>
+      <PageHeader title="Pay with UPI" backHref="/customer/checkout" />
 
-      {/* UPI QR Frame Card */}
-      <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-2xl space-y-6 text-center">
-        <div className="flex items-center gap-2 justify-center text-green font-semibold text-sm">
-          <ShieldCheck className="w-5 h-5 text-green" />
-          <span>Direct P2P Bank Payout</span>
-        </div>
+      <section className="card p-6 text-center">
+        <p className="inline-flex items-center gap-1.5 rounded-full bg-good-soft px-3 py-1 text-xs font-semibold text-good-fg">
+          <ShieldCheck className="h-3.5 w-3.5" /> Paid directly to the store
+        </p>
 
-        <div className="space-y-1">
-          <span className="text-xs text-text-muted">Credited to:</span>
-          <h4 className="font-extrabold text-base font-outfit">{store.merchantName}</h4>
-          <p className="text-[10px] text-text-muted font-mono">{store.paymentUpiId}</p>
-        </div>
+        <p className="mt-5 text-sm text-muted">Amount due</p>
+        <p className="tabular font-display text-4xl font-bold">{formatINR(order.total)}</p>
+        <p className="mt-1 text-xs text-muted">Invoice {order.invoiceNumber}</p>
 
-        <div className="space-y-1 py-4 border-t border-b border-border/40">
-          <span className="text-xs text-text-muted">Amount to Pay</span>
-          <h2 className="text-3xl font-extrabold font-outfit text-primary">₹{order.total.toFixed(2)}</h2>
-          <span className="text-[10px] px-2 py-0.5 rounded bg-surface-light dark:bg-white/5 border border-border font-bold tracking-wide uppercase text-text-muted">{order.invoiceNumber}</span>
-        </div>
-
-        {/* Dynamic SVG QR code */}
-        <div 
-          className="w-48 h-48 mx-auto p-3 bg-white rounded-2xl flex items-center justify-center shadow-inner"
-          dangerouslySetInnerHTML={{ __html: generateQRCodeSVG(upiDeepLink) }}
+        <div
+          className="mx-auto mt-6 h-52 w-52 rounded-2xl border border-line bg-white p-3"
+          dangerouslySetInnerHTML={{ __html: generateQRCodeSVG(upiLink) }}
         />
-        
-        <p className="text-[10px] text-text-muted leading-relaxed">
-          Scan using GPay, PhonePe, Paytm, or BHIM apps.
-        </p>
+        <p className="mt-3 text-sm font-medium">{store.merchantName}</p>
+        <p className="font-mono text-xs text-muted">{store.paymentUpiId}</p>
+        <p className="mt-3 text-xs text-muted">Scan with GPay, PhonePe, Paytm or any UPI app.</p>
 
-        {/* Mobile deep link */}
-        <a
-          href={upiDeepLink}
-          className="w-full flex items-center justify-center gap-2 py-3.5 rounded-xl bg-primary text-white font-bold text-sm shadow-lg shadow-primary/20 hover:bg-primary-dark hover:shadow-xl transition-all"
-        >
-          <Smartphone className="w-4 h-4" /> Pay via Mobile App
+        <a href={upiLink} className="btn-primary mt-6 w-full py-3">
+          <Smartphone className="h-4 w-4" /> Open UPI app
         </a>
-      </div>
+      </section>
 
-      {/* Simulator Sandbox Controller (Feature 4 & 15 compliance) */}
-      <div className="p-5 rounded-3xl bg-surface-card border border-border/60 shadow-lg space-y-4">
-        <div className="flex items-center gap-1.5 text-xs font-bold text-text-muted uppercase tracking-wider">
-          <Terminal className="w-4 h-4" />
-          <span>Payment Sandbox Simulation Controller</span>
+      <section className="mt-5 rounded-2xl border border-dashed border-line p-5">
+        <div className="flex items-center gap-2 text-sm font-semibold">
+          <FlaskConical className="h-4 w-4 text-muted" /> Test mode
         </div>
-        <p className="text-[11px] text-text-muted leading-relaxed">
-          Simulate the payment gateway callback hooks to verify orders logs, stock depletion levels, and WhatsApp/Email dispatches.
+        <p className="mt-1 text-sm text-muted">
+          This build uses a sandbox. Simulate the bank&apos;s response to see how orders, stock and receipts behave: pick an outcome below.
         </p>
-        
-        <div className="flex gap-3">
-          <button
-            onClick={() => handlePaymentCallback(false)}
-            disabled={verifying}
-            className="flex-1 flex items-center justify-center gap-1 py-2.5 rounded-xl border border-danger/25 text-danger font-bold text-xs hover:bg-danger/10 transition-all"
-          >
-            <XCircle className="w-4 h-4" /> Simulate Failure
+        <div className="mt-4 grid grid-cols-2 gap-3">
+          <button onClick={() => settlePayment(false)} disabled={verifying} className="btn-danger">
+            <XCircle className="h-4 w-4" /> Failure
           </button>
-          
-          <button
-            onClick={() => handlePaymentCallback(true)}
-            disabled={verifying}
-            className="flex-1 flex items-center justify-center gap-1 py-2.5 rounded-xl bg-green text-white font-bold text-xs shadow-md hover:bg-green-dark transition-all animate-pulse"
-          >
-            <CheckCircle className="w-4 h-4" /> {verifying ? 'Verifying...' : 'Simulate Success'}
+          <button onClick={() => settlePayment(true)} disabled={verifying} className="btn-primary">
+            <CheckCircle2 className="h-4 w-4" /> {verifying ? 'Verifying…' : 'Success'}
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

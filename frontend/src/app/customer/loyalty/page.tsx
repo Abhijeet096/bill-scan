@@ -1,36 +1,54 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
+import { Award, Copy, Gift, Ticket } from 'lucide-react';
 import { useAuth } from '../../../context/AuthContext';
-import { Award, Share2, Sparkles, Gift, ArrowLeft } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useToast } from '../../../context/ToastContext';
+import { PageHeader } from '../../../components/ui/PageHeader';
+import { Empty, Loading } from '../../../components/ui/States';
+import type { Coupon, Loyalty } from '../../../types';
+
+// Mirrors the tier thresholds the backend applies when an order is paid.
+const TIERS = [
+  { name: 'BRONZE', at: 0 },
+  { name: 'SILVER', at: 100 },
+  { name: 'GOLD', at: 300 },
+  { name: 'PLATINUM', at: 500 },
+];
+
+function tierProgress(points: number) {
+  const currentIndex = TIERS.reduce((found, tier, i) => (points >= tier.at ? i : found), 0);
+  const current = TIERS[currentIndex];
+  const next = TIERS[currentIndex + 1];
+
+  if (!next) return { nextTier: null, remaining: 0, percent: 100 };
+  return {
+    nextTier: next.name,
+    remaining: next.at - points,
+    percent: ((points - current.at) / (next.at - current.at)) * 100,
+  };
+}
 
 export default function LoyaltyProgram() {
-  const router = useRouter();
   const { user, apiFetch } = useAuth();
-  
-  const [loyalty, setLoyalty] = useState<any>(null);
-  const [coupons, setCoupons] = useState<any[]>([]);
+  const { notify } = useToast();
+
+  const [loyalty, setLoyalty] = useState<Loyalty | null>(null);
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
   const [referralInput, setReferralInput] = useState('');
   const [loading, setLoading] = useState(true);
 
-  const fetchLoyaltyData = async () => {
+  const loadLoyalty = async () => {
     if (!user) return;
     setLoading(true);
     try {
-      // 1. Fetch loyalty points
-      const loyaltyRes = await apiFetch(`/api/loyalty?storeId=${user.storeId || ''}`);
-      if (loyaltyRes.ok) {
-        const loyaltyData = await loyaltyRes.json();
-        setLoyalty(loyaltyData);
-      }
-
-      // 2. Fetch active coupons
-      const couponsRes = await apiFetch(`/api/loyalty/coupons?storeId=${user.storeId || ''}`);
-      if (couponsRes.ok) {
-        const couponsData = await couponsRes.json();
-        setCoupons(couponsData);
-      }
+      const storeQuery = `storeId=${user.storeId || ''}`;
+      const [loyaltyRes, couponsRes] = await Promise.all([
+        apiFetch(`/api/loyalty?${storeQuery}`),
+        apiFetch(`/api/loyalty/coupons?${storeQuery}`),
+      ]);
+      if (loyaltyRes.ok) setLoyalty(await loyaltyRes.json());
+      if (couponsRes.ok) setCoupons(await couponsRes.json());
     } catch (e) {
       console.error(e);
     } finally {
@@ -39,146 +57,140 @@ export default function LoyaltyProgram() {
   };
 
   useEffect(() => {
-    fetchLoyaltyData();
+    loadLoyalty();
   }, [user]);
 
   const handleApplyReferral = async () => {
-    if (!referralInput) return;
+    if (!referralInput.trim()) return;
     try {
       const res = await apiFetch('/api/loyalty/referral', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          referralCode: referralInput.toUpperCase(),
-          storeId: user?.storeId
-        })
+        body: JSON.stringify({ referralCode: referralInput.trim().toUpperCase(), storeId: user?.storeId }),
       });
-
       const data = await res.json();
+
       if (res.ok) {
-        alert('Referral bonus successfully applied!');
+        notify('Referral bonus added to your balance.', 'success');
         setReferralInput('');
-        fetchLoyaltyData();
+        loadLoyalty();
       } else {
-        alert(data.error || 'Failed to apply referral code.');
+        notify(data.error || 'That referral code could not be applied.', 'error');
       }
     } catch (e) {
       console.error(e);
+      notify('Something went wrong. Please try again.', 'error');
     }
   };
 
-  if (loading) {
-    return <div className="text-center py-12 text-text-muted">Loading loyalty dashboard...</div>;
-  }
+  const copyReferralCode = async () => {
+    if (!loyalty?.referralCode) return;
+    try {
+      await navigator.clipboard.writeText(loyalty.referralCode);
+      notify('Referral code copied.', 'success');
+    } catch {
+      notify('Could not copy. Select the code and copy it manually.', 'error');
+    }
+  };
 
-  // Tier progress calculations
-  const points = loyalty?.points || 0;
-  let nextTier = 'SILVER';
-  let targetPoints = 100;
-  let progressPercent = (points / 100) * 100;
+  if (loading) return <Loading label="Loading your rewards…" />;
 
-  if (points >= 500) {
-    nextTier = 'MAX TIER';
-    targetPoints = 500;
-    progressPercent = 100;
-  } else if (points >= 300) {
-    nextTier = 'PLATINUM';
-    targetPoints = 500;
-    progressPercent = ((points - 300) / 200) * 100;
-  } else if (points >= 100) {
-    nextTier = 'GOLD';
-    targetPoints = 300;
-    progressPercent = ((points - 100) / 200) * 100;
-  }
+  const points = loyalty?.points ?? 0;
+  const { nextTier, remaining, percent } = tierProgress(points);
 
   return (
-    <div className="space-y-6 dark text-foreground">
-      {/* Header */}
-      <div className="flex items-center justify-between pb-4 border-b border-border">
-        <button onClick={() => router.push('/customer/home')} className="p-2 rounded-xl bg-surface-light dark:bg-white/5 border border-border">
-          <ArrowLeft className="w-5 h-5" />
-        </button>
-        <h2 className="text-xl font-bold font-outfit">Loyalty Program</h2>
-        <div className="w-9 h-9"></div>
-      </div>
+    <div className="space-y-5">
+      <PageHeader title="Rewards" backHref="/customer/home" />
 
-      {/* Points Card */}
-      <div className="p-6 rounded-3xl glass-card border border-white/5 shadow-2xl space-y-6 text-center">
-        <div className="w-12 h-12 rounded-full bg-primary/10 text-primary flex items-center justify-center mx-auto border-2 border-primary/20">
-          <Award className="w-6 h-6" />
-        </div>
-        
-        <div className="space-y-1">
-          <span className="text-xs text-text-muted">Your reward points balance</span>
-          <h2 className="text-4xl font-extrabold font-outfit text-primary">{points} <span className="text-sm font-semibold text-text-muted">points</span></h2>
-          <span className="text-xs font-bold text-accent tracking-wide uppercase">{loyalty?.tier} LEVEL MEMBER</span>
-        </div>
-
-        {/* Tier progress bar */}
-        <div className="space-y-2">
-          <div className="flex justify-between text-[10px] text-text-muted">
-            <span>Current: {loyalty?.tier}</span>
-            <span>Next Level: {nextTier} ({points}/{targetPoints} pts)</span>
+      <section className="card p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-sm text-muted">Points balance</p>
+            <p className="tabular font-display text-5xl font-bold">{points}</p>
           </div>
-          <div className="h-2 w-full rounded-full bg-surface border border-border overflow-hidden">
-            <div className="h-full bg-primary transition-all duration-500" style={{ width: `${Math.min(100, Math.max(5, progressPercent))}%` }}></div>
+          <div className="text-right">
+            <span className="flex h-12 w-12 items-center justify-center rounded-full bg-brand-soft text-brand-fg">
+              <Award className="h-6 w-6" />
+            </span>
           </div>
         </div>
-      </div>
 
-      {/* Referral Box */}
-      <div className="p-5 rounded-3xl glass-card border border-white/5 shadow-xl space-y-4">
-        <h3 className="text-sm font-bold font-outfit flex items-center gap-1.5 text-accent">
-          <Share2 className="w-4 h-4 text-accent" /> Share Referral Code
-        </h3>
-        <p className="text-[11px] text-text-muted leading-relaxed">
-          Invite friends to shop! When they use your code, they save 15% on their first order and you get 50 bonus points automatically.
+        <div className="mt-6">
+          <div className="mb-2 flex justify-between text-xs">
+            <span className="font-semibold capitalize">{loyalty?.tier?.toLowerCase()} member</span>
+            <span className="text-muted">
+              {nextTier ? `${remaining} pts to ${nextTier.toLowerCase()}` : 'Top tier reached'}
+            </span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-sunken">
+            <div className="h-full rounded-full bg-brand transition-all duration-500" style={{ width: `${Math.min(100, Math.max(3, percent))}%` }} />
+          </div>
+        </div>
+      </section>
+
+      <section className="card p-6">
+        <h2 className="text-lg font-semibold">Refer a friend</h2>
+        <p className="mt-1 text-sm text-muted">
+          Friends save 15% on their first order when they use your code, and you get 50 bonus points.
         </p>
-        <div className="p-3 bg-background border border-border rounded-xl font-mono text-center font-bold text-sm select-all">
-          {loyalty?.referralCode}
-        </div>
 
-        <div className="border-t border-border/20 pt-4 flex gap-2">
-          <input
-            type="text"
-            value={referralInput}
-            onChange={(e) => setReferralInput(e.target.value)}
-            placeholder="Apply Friend Code"
-            className="flex-1 px-3 py-2 rounded-xl border border-border bg-background focus:outline-none focus:border-primary text-xs"
-          />
-          <button
-            onClick={handleApplyReferral}
-            className="px-4 py-2 rounded-xl bg-accent text-white font-bold text-xs shadow-md"
-          >
-            Claim Bonus
+        <div className="mt-4 flex items-center gap-2">
+          <code className="flex-1 select-all rounded-lg bg-sunken px-4 py-2.5 text-center font-mono text-sm font-bold tracking-wider">
+            {loyalty?.referralCode}
+          </code>
+          <button onClick={copyReferralCode} className="btn-secondary" aria-label="Copy referral code">
+            <Copy className="h-4 w-4" />
           </button>
         </div>
-      </div>
 
-      {/* Reward Coupons */}
-      <div className="p-5 rounded-3xl glass-card border border-white/5 shadow-xl space-y-4">
-        <h3 className="text-sm font-bold font-outfit flex items-center gap-1.5 text-primary">
-          <Gift className="w-4 h-4 text-primary" /> Active Reward Coupons
-        </h3>
-        
-        {coupons.length > 0 ? (
-          <div className="space-y-3">
-            {coupons.map(c => (
-              <div key={c.id} className="p-3.5 rounded-2xl bg-background/50 border border-border flex items-center justify-between">
-                <div>
-                  <h4 className="font-extrabold text-sm text-foreground">{c.code}</h4>
-                  <p className="text-[10px] text-text-muted mt-0.5">Expires: {new Date(c.expiresAt).toLocaleDateString()}</p>
-                </div>
-                <span className="px-2.5 py-1 text-xs font-bold rounded-lg bg-green/10 text-green">
-                  Save {c.discountPercent}%
-                </span>
-              </div>
-            ))}
+        <div className="mt-5 border-t border-line pt-5">
+          <label htmlFor="friend-code" className="label">
+            Got a friend&apos;s code?
+          </label>
+          <div className="flex gap-2">
+            <input
+              id="friend-code"
+              type="text"
+              value={referralInput}
+              onChange={(e) => setReferralInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleApplyReferral()}
+              placeholder="Enter code"
+              className="input uppercase placeholder:normal-case"
+            />
+            <button onClick={handleApplyReferral} className="btn-primary shrink-0">
+              Claim
+            </button>
           </div>
+        </div>
+      </section>
+
+      <section className="card">
+        <div className="flex items-center gap-2 px-6 pt-6">
+          <Gift className="h-5 w-5 text-brand-fg" />
+          <h2 className="text-lg font-semibold">Your coupons</h2>
+        </div>
+
+        {coupons.length > 0 ? (
+          <ul className="mt-3 divide-y divide-line">
+            {coupons.map((coupon) => (
+              <li key={coupon.id} className="flex items-center justify-between gap-3 px-6 py-4">
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-sunken text-muted">
+                    <Ticket className="h-4 w-4" />
+                  </span>
+                  <div>
+                    <p className="font-mono text-sm font-bold">{coupon.code}</p>
+                    <p className="text-xs text-muted">Expires {new Date(coupon.expiresAt).toLocaleDateString([], { dateStyle: 'medium' })}</p>
+                  </div>
+                </div>
+                <span className="badge-good">{coupon.discountPercent}% off</span>
+              </li>
+            ))}
+          </ul>
         ) : (
-          <p className="text-center text-xs text-text-muted py-4">No coupons available. Spend points to generate coupons.</p>
+          <Empty title="No coupons right now" description="Earn points with every purchase to unlock coupons." />
         )}
-      </div>
+      </section>
     </div>
   );
 }

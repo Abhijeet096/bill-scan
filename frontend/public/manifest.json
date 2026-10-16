@@ -1,0 +1,10 @@
+{
+  "name": "QuickStore",
+  "short_name": "QuickStore",
+  "description": "QR self-checkout for local stores",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#fafaf7",
+  "theme_color": "#0f8a5c",
+  "icons": [{ "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

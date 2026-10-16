@@ -2,6 +2,7 @@
 
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { useToast } from './ToastContext';
 
 export type UserRole = 'OWNER' | 'MANAGER' | 'CASHIER' | 'STAFF' | 'CUSTOMER';
 
@@ -30,6 +31,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const router = useRouter();
+  const { notify } = useToast();
 
   // Load session from localStorage on initialization
   useEffect(() => {
@@ -52,7 +54,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const data = await response.json();
       if (!response.ok) {
-        alert(data.error || 'Login failed.');
+        notify(data.error || 'Login failed.', 'error');
         return false;
       }
 
@@ -70,7 +72,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (e) {
       console.error(e);
-      alert('Network error connecting to authentication server.');
+      notify('Could not reach the server. Check your connection and try again.', 'error');
       return false;
     }
   };
@@ -85,7 +87,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       const data = await response.json();
       if (!response.ok) {
-        alert(data.error || 'Signup failed.');
+        notify(data.error || 'Signup failed.', 'error');
         return false;
       }
 
@@ -103,7 +105,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return true;
     } catch (e) {
       console.error(e);
-      alert('Signup connection failed.');
+      notify('Could not reach the server. Check your connection and try again.', 'error');
       return false;
     }
   };
