@@ -11,7 +11,7 @@ const itemCount = CART.reduce((sum, item) => sum + item.qty, 0);
 
 /** Static illustration of the shopper's cart, built in markup so it stays sharp and themeable. */
 export const PhoneMockup: React.FC = () => (
-  <div className="relative mx-auto w-full max-w-[420px] py-6">
+  <div className="relative mx-auto w-full max-w-[520px] py-6">
     <div className="absolute inset-0 -z-10 rounded-[2rem] bg-brand-soft" aria-hidden="true" />
     <div
       className="absolute inset-0 -z-10 rounded-[2rem] opacity-60 [background-image:radial-gradient(rgb(var(--brand)/0.25)_1px,transparent_1px)] [background-size:18px_18px]"
@@ -59,27 +59,24 @@ export const PhoneMockup: React.FC = () => (
       </div>
     </div>
 
-    <div className="absolute -left-1 top-24 hidden animate-fade-up items-center gap-2.5 rounded-xl border border-line bg-surface p-3 shadow-lift [animation-delay:300ms] sm:flex">
+    {/* Callouts sit in the side margins so they never cover the cart text. */}
+    <div className="absolute left-0 top-28 hidden w-[7.5rem] animate-fade-up rounded-xl border border-line bg-surface p-3 shadow-lift [animation-delay:300ms] sm:block">
       <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-soft text-brand-fg">
         <ScanLine className="h-4 w-4" />
       </span>
-      <div>
-        <p className="text-xs font-semibold">Item scanned</p>
-        <p className="text-[11px] text-muted">Added to cart</p>
-      </div>
+      <p className="mt-2 text-xs font-semibold">Item scanned</p>
+      <p className="text-[11px] leading-snug text-muted">Added to cart</p>
     </div>
 
-    <div className="absolute -right-1 bottom-20 hidden animate-fade-up items-center gap-2.5 rounded-xl border border-line bg-surface p-3 shadow-lift [animation-delay:500ms] sm:flex">
+    <div className="absolute bottom-24 right-0 hidden w-[7.5rem] animate-fade-up rounded-xl border border-line bg-surface p-3 shadow-lift [animation-delay:500ms] sm:block">
       <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-soft text-brand-fg">
         <PackageCheck className="h-4 w-4" />
       </span>
-      <div>
-        <p className="text-xs font-semibold">Stock updated</p>
-        <p className="text-[11px] text-muted">After every paid order</p>
-      </div>
+      <p className="mt-2 text-xs font-semibold">Stock updated</p>
+      <p className="text-[11px] leading-snug text-muted">After each paid order</p>
     </div>
 
-    <div className="absolute -right-1 top-8 hidden animate-fade-up items-center gap-2 rounded-full border border-line bg-surface py-1.5 pl-2 pr-3 shadow-lift [animation-delay:700ms] sm:flex">
+    <div className="absolute right-0 top-10 hidden animate-fade-up items-center gap-1.5 rounded-full border border-line bg-surface py-1.5 pl-2 pr-3 shadow-lift [animation-delay:700ms] sm:flex">
       <CheckCircle2 className="h-4 w-4 text-good" />
       <span className="text-xs font-semibold">Paid via UPI</span>
     </div>

@@ -5,7 +5,7 @@ import { PhoneMockup } from './PhoneMockup';
 const HIGHLIGHTS = ['UPI payments', 'Works offline', 'GST invoices', 'Hindi and Marathi voice'];
 
 export const Hero: React.FC = () => (
-  <section className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-[1.1fr_0.9fr] lg:gap-8 lg:pb-24 lg:pt-20">
+  <section className="mx-auto grid max-w-6xl items-center gap-12 px-4 pb-16 pt-12 sm:px-6 lg:grid-cols-2 lg:gap-8 lg:pb-24 lg:pt-20">
     <div className="animate-fade-up">
       <p className="inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1 text-xs font-medium text-muted">
         <span className="h-1.5 w-1.5 rounded-full bg-brand" />
